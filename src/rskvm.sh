@@ -2732,10 +2732,6 @@ local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _e
     #echo -n "$PAYLOAD_SYSCTL_FORWARD" | base64 -d >/etc/sysctl.d/ip_forward.conf
     #sysctl -p /etc/sysctl.d/ip_forward.conf >/dev/null
     echo -n "$PAYLOAD_VIRT_NET_DEFAULT" | base64 -d | NET_DNS_SERVER="10.53.53.53" NET_DOMAIN="vm" IP_GW="${_first_ip}" IP_NETMASK="${_netmask}" IP_START="${_start_ip}" IP_END="${_end_ip}" envsubst '$IP_START $IP_END $IP_NETMASK $IP_GW $NET_DOMAIN $NET_DNS_SERVER' >/tmp/default.xml
-    if [[ "${_user}" != "root" ]]
-    then
-      gpasswd -a "${_user}" libvirt
-    fi
     if virsh net-info default &>/dev/null
     then
       virsh net-destroy default &>/dev/null || true
