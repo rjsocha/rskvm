@@ -3310,6 +3310,10 @@ _check_runtime() {
   then
     _abort_script "{G}curl{R} is required..."
   fi
+  if ! command -v ssh &>/dev/null
+  then
+    _abort_script "{G}ssh{R} is required..."
+  fi
 }
 
 main() {
