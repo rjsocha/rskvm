@@ -3271,10 +3271,24 @@ local _api _network _resp _val
   fi
 }
 
+_is_root_required() {
+local _me=$(uname -s)
+  _me="${_me,,}"
+  case "${_me}" in
+    cygwin*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
 _self_update() {
   if [[ $(id -u) -ne 0 ]]
   then
-    _abort_script "run me as root: {G}sudo $0 me:update {N}or {Y}sudo !!"
+    if _is_root_required
+    then
+      _abort_script "run me as root: {G}sudo $0 me:update {N}or {Y}sudo !!"
+    fi
   fi
   if curl -sL -o /usr/bin/rskvm https://github.com/rjsocha/rskvm/releases/latest/download/rskvm
   then
@@ -3292,7 +3306,10 @@ _install() {
   fi
   if [[ $(id -u) -ne 0 ]]
   then
-    _abort_script "run me as root: {G}sudo $0 me:install {N}or {Y}sudo !!"
+    if _is_root_required
+    then
+      _abort_script "run me as root: {G}sudo $0 me:install {N}or {Y}sudo !!"
+    fi
   fi
   if [[ "$0" != "/usr/bin/rskvm" ]]
   then
