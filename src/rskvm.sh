@@ -3315,7 +3315,7 @@ _install() {
     then
       if [[ -t 0 ]]
       then
-        exec sudo $0 me:update
+        exec sudo bash $0 me:update
       else
         _abort_script "run me as root: {G}sudo $0 me:install"
       fi
