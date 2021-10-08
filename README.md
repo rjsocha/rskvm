@@ -7,7 +7,7 @@ curl -sOL https://github.com/rjsocha/rskvm/releases/latest/download/rskvm
 ```
 
 ```
-sudo bash ./rskvm me:install
+bash ./rskvm me:install
 ```
 
 ```

@@ -3287,7 +3287,12 @@ _self_update() {
   then
     if _is_root_required
     then
-      _abort_script "run me as root: {G}sudo $0 me:update {N}or {Y}sudo !!"
+      if [[ -t 0 ]]
+      then
+        exec sudo $0 me:update
+      else
+        _abort_script "run me as root: {G}sudo $0 me:update"
+      fi
     fi
   fi
   if curl -sL -o /usr/bin/rskvm https://github.com/rjsocha/rskvm/releases/latest/download/rskvm
@@ -3308,7 +3313,12 @@ _install() {
   then
     if _is_root_required
     then
-      _abort_script "run me as root: {G}sudo $0 me:install {N}or {Y}sudo !!"
+      if [[ -t 0 ]]
+      then
+        exec sudo $0 me:update
+      else
+        _abort_script "run me as root: {G}sudo $0 me:install"
+      fi
     fi
   fi
   if [[ "$0" != "/usr/bin/rskvm" ]]
