@@ -26,7 +26,7 @@ export DEFAULT_RAM=1024
 export DEFAULT_CPU=1
 export LIBVIRT_DEFAULT_URI="qemu:///system"
 export KVMREPO="http://kvm.socha.it"
-export ZT_API="https://my.zerotier.com/api"
+export ZT_API="https://my.zerotier.com/api/v1"
 export IS_REMOTE=0
 export COLOR="${COLOR:-yes}"
 
