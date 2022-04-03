@@ -1369,7 +1369,6 @@ local _params
 
   _params=()
   _params+=( --name "${_name}" )
-  _params+=( --os-type "${_os}" )
   _params+=( --os-variant "${_variant}" )
   _params+=( --memory "${_ram}" )
   _params+=( --vcpus sockets=1,threads=1,cores=${_cpu} )
@@ -1585,10 +1584,10 @@ local _uuid _list _desc _state _title _os _color _protected _name _me _quiet="${
       if [[ ${_protected} -eq 1 ]]
       then
         _printf "${_color}%-9s{N}" "${_state}"
-        _printf "{R}+{Y}%-20s{C}%-16s{N}%s\n" "${_name}" "${_ip}"  "${_os}"
+        _printf "{R}+{Y}%-30s{C}%-16s{N}%s\n" "${_name}" "${_ip}"  "${_os}"
       else
         _printf "${_color}%-10s{N}" "${_state}"
-        _printf "{Y}%-20s{C}%-16s{N}%s\n" "${_name}" "${_ip}" "${_os}"
+        _printf "{Y}%-30s{C}%-16s{N}%s\n" "${_name}" "${_ip}" "${_os}"
       fi
     fi
   done
@@ -2130,8 +2129,11 @@ local _name="${1}" _desc
     fi
     _verbose_printf "Removing VM {G}%s\n" "${_name}"
     virsh destroy --domain "${_name}" &>>~/.rskvm.log || true
-    virsh undefine --domain "${_name}" --remove-all-storage --delete-storage-volume-snapshots --managed-save --snapshots-metadata --checkpoints-metadata --nvram &>>~/.rskvm.log || true
-    if [[ -f ${VM_STORAGE}/${NAME}.vm ]]
+    # Bug in Ubuntu 22.04? 
+    # error: unsupported flags (0x2) in function virStorageBackendVolDeleteLocal
+    # removed: --delete-storage-volume-snapshots
+    virsh undefine --domain "${_name}" --remove-all-storage --managed-save --snapshots-metadata --checkpoints-metadata --nvram &>>~/.rskvm.log || true
+    if [[ -f ${VM_STORAGE}/${_name}.vm ]]
     then
       _printf "orphan image: {R}%s.vm\n" "${_name}"
       rm -f "${VM_STORAGE}/${_name}.vm"
@@ -2604,7 +2606,7 @@ local _subnet="$1" _first_ip="$2" _start_ip="$3" _end_ip="$4" _net _cidr _netmas
 }
 
 _setup_host() {
-local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _end_ip _ssh_port="22"
+local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _end_ip _ssh_port="22" _verbose=0 _pkgs
   for _arg in $@
   do
     case "${_arg,,}" in
@@ -2624,6 +2626,9 @@ local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _e
       --remote)
         _remote=1
         ;;
+      --verbose)
+        _verbose=1
+        ;;
     esac
   done
   if [[ -z ${_subnet} ]]
@@ -2636,26 +2641,29 @@ local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _e
     _ssh_port="22"
   fi
 
-  if ! _is_cidr "${_subnet}"
+  if [[ ${_subnet} != "local" ]]
   then
-    _abort_script "{R}incorrect {G}subnet{R} format"
-  fi
+    if ! _is_cidr "${_subnet}"
+    then
+      _abort_script "{R}incorrect {G}subnet{R} format"
+    fi
 
-  if ! _is_correct_subnet "${_subnet}"
-  then
-    _abort_script "{R}incorrect {G}subnet{R} address given"
-  fi
-  _netmask=$(_netmask_from_subnet "${_subnet}")
-  if [[ -z ${_first_ip} ]] || [[ -z ${_start_ip} ]] || [[ -z ${_end_ip} ]]
-  then
-    _first_ip=$(_first_ip_from_subnet "${_subnet}")
-    _start_ip=$(_start_ip_from_subnet "${_subnet}")
-    _end_ip=$(_end_ip_from_subnet "${_subnet}")
-  fi
+    if ! _is_correct_subnet "${_subnet}"
+    then
+      _abort_script "{R}incorrect {G}subnet{R} address given"
+    fi
+    _netmask=$(_netmask_from_subnet "${_subnet}")
+    if [[ -z ${_first_ip} ]] || [[ -z ${_start_ip} ]] || [[ -z ${_end_ip} ]]
+    then
+      _first_ip=$(_first_ip_from_subnet "${_subnet}")
+      _start_ip=$(_start_ip_from_subnet "${_subnet}")
+      _end_ip=$(_end_ip_from_subnet "${_subnet}")
+    fi
 
-  if ! _is_ip_subnet_valid "${_subnet}" "${_first_ip}" "${_start_ip}" "${_end_ip}"
-  then
-    _abort_script "{R}invalid network specification for {G}subnet"
+    if ! _is_ip_subnet_valid "${_subnet}" "${_first_ip}" "${_start_ip}" "${_end_ip}"
+    then
+      _abort_script "{R}invalid network specification for {G}subnet"
+    fi
   fi
 
   if [[ -n ${FOR_USER} ]]
@@ -2673,7 +2681,7 @@ local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _e
     if [[ "${ID}" == "ubuntu" ]]
     then
       case "${VERSION_ID}" in
-        20.04)
+        20.04|22.04)
           ;;
         *)
         _abort_script "unsupported Ubuntu version %s" "${VERSION_ID}"
@@ -2698,49 +2706,59 @@ local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _e
     fi
     if [[ $(id -u) -ne 0 ]]
     then
-      _abort_script "run me as root: {G}sudo $0 setup::host {N}or {Y}sudo !!"
+      _abort_script "run me as root: {G}sudo $0 setup::host subnet:${_subnet} {N}or {Y}sudo !!"
     fi
     _printf "Installation of required packages ... {+}{G}please wait {N}..."
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get &>/dev/null dist-upgrade -qq
-    apt-get &>/dev/null install -qq --no-install-recommends \
-      qemu-kvm \
-      virtinst \
-      libvirt-daemon \
-      libvirt-clients \
-      qemu-utils \
-      bridge-utils \
-      libvirt-daemon-driver-qemu \
-      libvirt-daemon-system \
-      qemu-system-x86 \
-      dnsmasq-base \
-      cpu-checker \
-      gpg gpg-agent \
-      curl \
-      jq \
-      netfilter-persistent iptables-persistent
+    apt-get update &>>~/.rskvm.log
+    apt-get dist-upgrade -y &>>~/.rskvm.log
+    _pkgs=()
+    _pkgs+=( "qemu-kvm" )
+    _pkgs+=( "virtinst" )
+    _pkgs+=( "libvirt-daemon" )
+    _pkgs+=( "libvirt-clients" )
+    _pkgs+=( "qemu-utils" )
+    _pkgs+=( "bridge-utils" )
+    _pkgs+=( "libvirt-daemon-driver-qemu" )
+    _pkgs+=( "libvirt-daemon-system" )
+    _pkgs+=( "qemu-system-x86" )
+    _pkgs+=( "cpu-checker" )
+    _pkgs+=( "gpg" )
+    _pkgs+=( "gpg-agent" )
+    _pkgs+=( "curl" )
+    _pkgs+=( "jq" )
+    if [[ ${_subnet} != "local" ]]
+    then
+      _pkgs+=( "dnsmasq-base" )
+      _pkgs+=( "netfilter-persistent" )
+      _pkgs+=( "iptables-persistent" )
+    fi
+    apt-get install -y --no-install-recommends ${_pkgs[@]} &>>~/.rskvm.log
     _printf "\rInstallation of required packages ... {G} DONE {N}...       \n"
-    _printf "Configuration of iptables\n"
-    if [[ -f /etc/iptables/rules.v4 ]] && [[ ! -f /etc/iptables/rules.v4.save.rskvm ]]
+
+    if [[ ${_subnet} != "local" ]]
     then
-      cp "/etc/iptables/rules.v4" "/etc/iptables/rules.v4.save.rskvm"
+      _printf "Configuration of iptables\n"
+      if [[ -f /etc/iptables/rules.v4 ]] && [[ ! -f /etc/iptables/rules.v4.save.rskvm ]]
+      then
+        cp "/etc/iptables/rules.v4" "/etc/iptables/rules.v4.save.rskvm"
+      fi
+      echo -n "$PAYLOAD_IPTABLES_RULES" | base64 -d | SUBNET="${_subnet}" HOST_SSH_PORT="${_ssh_port}" envsubst '$SUBNET $HOST_SSH_PORT' >/etc/iptables/rules.v4
+      systemctl restart netfilter-persistent
+      #_printf "Configuration of ip forwarding...\n"
+      #echo -n "$PAYLOAD_SYSCTL_FORWARD" | base64 -d >/etc/sysctl.d/ip_forward.conf
+      #sysctl -p /etc/sysctl.d/ip_forward.conf >/dev/null
+      echo -n "$PAYLOAD_VIRT_NET_DEFAULT" | base64 -d | NET_DNS_SERVER="10.53.53.53" NET_DOMAIN="vm" IP_GW="${_first_ip}" IP_NETMASK="${_netmask}" IP_START="${_start_ip}" IP_END="${_end_ip}" envsubst '$IP_START $IP_END $IP_NETMASK $IP_GW $NET_DOMAIN $NET_DNS_SERVER' >/tmp/default.xml
+      if virsh net-info default &>/dev/null
+      then
+        virsh net-destroy default &>/dev/null || true
+        virsh net-undefine default &>/dev/null || true
+      fi
+      virsh net-define /tmp/default.xml
+      virsh net-start default
+      virsh net-autostart default
+      rm /tmp/default.xml
     fi
-    echo -n "$PAYLOAD_IPTABLES_RULES" | base64 -d | SUBNET="${_subnet}" HOST_SSH_PORT="${_ssh_port}" envsubst '$SUBNET $HOST_SSH_PORT' >/etc/iptables/rules.v4
-    systemctl restart netfilter-persistent
-    #_printf "Configuration of ip forwarding...\n"
-    #echo -n "$PAYLOAD_SYSCTL_FORWARD" | base64 -d >/etc/sysctl.d/ip_forward.conf
-    #sysctl -p /etc/sysctl.d/ip_forward.conf >/dev/null
-    echo -n "$PAYLOAD_VIRT_NET_DEFAULT" | base64 -d | NET_DNS_SERVER="10.53.53.53" NET_DOMAIN="vm" IP_GW="${_first_ip}" IP_NETMASK="${_netmask}" IP_START="${_start_ip}" IP_END="${_end_ip}" envsubst '$IP_START $IP_END $IP_NETMASK $IP_GW $NET_DOMAIN $NET_DNS_SERVER' >/tmp/default.xml
-    if virsh net-info default &>/dev/null
-    then
-      virsh net-destroy default &>/dev/null || true
-      virsh net-undefine default &>/dev/null || true
-    fi
-    virsh net-define /tmp/default.xml
-    virsh net-start default
-    virsh net-autostart default
-    rm /tmp/default.xml
     if [[ ${_remote} -eq 0 ]]
     then
       _printf "\n{G}READY\n\n"
