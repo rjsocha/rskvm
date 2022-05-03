@@ -2548,12 +2548,9 @@ local _subnet="$1" _net_addr _ip_string  _prefix
   _ip_string=$(_ip_from_cidr "${_subnet}")
   _prefix=$(_cidr_from_cidr "${_subnet}")
   _net_addr=$(_ip2long "${_ip_string}")
-  if [[ ${_prefix} -ge 23 ]]
+  if [[ ${_prefix} -ge 24 ]]
   then
-    _net_addr=$(( _net_addr + 32 ))
-  elif [[ ${_prefix} -ge 20 ]]
-  then
-    _net_addr=$(( _net_addr + 128 ))
+    _net_addr=$(( _net_addr + 64 ))
   else
     _net_addr=$(( _net_addr + 256 ))
   fi
