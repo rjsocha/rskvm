@@ -15,8 +15,20 @@
 #  rskvm setup::host:<name> overlay-network:zt zt-net:<net> subnet:<prefix>
 #  rskvm me:install me:version
 #
+#  Overlay ZT network:
 #
-# End Of Usage
+#    rskvm overlay:zt:name:<ZT-NAME>
+#    rskvm overlay:zt:api:<ZT-API-KEY>
+#    rskvm overlay:zt:network:<ZT-NETWORK-ID>
+#    rskvm overlay:zt:verify
+#
+#  Host setup:
+#
+#    rskvm config:host host:<NAME> address:<FQDN> user:<USER> port:<SSH-PORT>
+#    rskvm setup:host:vm1 zt:<ZT-NAME> subnet:10.244.244.0/24 [zt-ip:<ZT-NODE-IP>]
+#
+# EOU
+# Above EOU tag is required  as a mark of End Of Usage
 
 set -eE
 
@@ -29,6 +41,7 @@ export KVMREPO="http://kvm.socha.it"
 export ZT_API="https://my.zerotier.com/api/v1"
 export IS_REMOTE=0
 export COLOR="${COLOR:-yes}"
+CURL_TIMEOUT=10
 
 _trap_error() {
 local frame=0 LINE SUB FILE
@@ -152,7 +165,7 @@ local _me=$(realpath -eq $0)
   _printf "{G}{N}"
   tail -q -n+2 "${_me}" | head -q -n 7 | sed "s/^#//" |  grep -v "^$" >&2
   _printf "{Y}{N}"
-  tail -q -n+9 "${_me}" | head -q -n 10 | sed "s/^#//" |  grep -v "^$" >&2
+  sed -n '/^# Usage/,${p;/^# EOU/q}' "${_me}" | head -q -n-1 | sed "s/^#//" >&2
   _printf "{N}{N}"
 }
 
@@ -418,13 +431,16 @@ local _val
 }
 
 _config_host_zt_remove() {
-local _host="${1}" _zt_node _zt_address _subnet
+local _host="${1}" _zt_node _zt_address _subnet _zt_net
 
   if ! _subnet=$(_config_get /host/${_host}/subnet)
   then
      _subnet=$(_config_get /host/${_host}/zt_subnet) || true
   fi
-
+  if _zt_net=$(_config_get /host/${_host}/overlay/zt/network)
+  then
+    _config_put "/overlay/zt/current" "${_zt_net}"
+  fi
   if ! _zt_node=$(_config_get /host/${_host}/overlay/zt/node)
   then
     _zt_node=$(_config_get /host/${_host}/zt) || true
@@ -528,6 +544,10 @@ local _host="${_runtime[host]}" _val="" _w=-8
   elif _val=$(_config_get /host/${_host}/zt_subnet)
   then
     _printf "{G}%${_w}s {N}%s\n" "SUBNET:" "$_val"
+  fi
+  if _val=$(_config_get /host/${_host}/overlay/zt/network)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "ZT NET:" "$_val"
   fi
   if _val=$(_config_get /host/${_host}/overlay/zt/node)
   then
@@ -1236,7 +1256,7 @@ local _template=$1 _hash=$2 _url
   fi
   if _url=$(_config_get "image/alias/by-hash/${_hash}/url")
   then
-    if curl -sIf -o /dev/null "${_url}"
+    if curl --connect-timeout "${CURL_TIMEOUT}" -sIf -o /dev/null "${_url}"
     then
       _verbose_printf "Retrieving image template {G}%s{N} from {Y}%s\n" "${_template}" "${_url}"
       if [[ -f ${TEMPLATES}/${_template} ]]
@@ -1252,7 +1272,7 @@ local _template=$1 _hash=$2 _url
         _abort_script "unable to create image template directory at {Y}%s" "${TEMPLATES}/${_template}/"
       fi
       _printf "{R}{N}"
-      if curl -#f "${_url}" | xzcat --uncompress --to-stdout --single-stream  | dd of="${TEMPLATES}/${_template}/${_hash}.download" status=none
+      if curl --connect-timeout "${CURL_TIMEOUT}" -#f "${_url}" | xzcat --uncompress --to-stdout --single-stream  | dd of="${TEMPLATES}/${_template}/${_hash}.download" status=none
       then
         mv "${TEMPLATES}/${_template}/${_hash}.download" "${TEMPLATES}/${_template}/${_hash}"
         _printf "{G}"
@@ -1628,9 +1648,9 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
   _config_rm "/image"
   _config_put "/image/version" "1"
   declare -A _images
-  if curl -sIf -o /dev/null "${KVMREPO}/catalog"
+  if curl --connect-timeout "${CURL_TIMEOUT}" -sIf -o /dev/null "${KVMREPO}/catalog"
   then
-    if _catalog=$(curl -sf "${KVMREPO}/catalog")
+    if _catalog=$(curl --connect-timeout "${CURL_TIMEOUT}" -sf "${KVMREPO}/catalog")
     then
       _image=""
       set -- ${_catalog}
@@ -2892,7 +2912,7 @@ _is_cidr() {
 
 # zt installer sucks :)
 _install_zerotier_one() {
-  curl -s https://install.zerotier.com | sudo bash &>/dev/null
+  curl --connect-timeout "${CURL_TIMEOUT}" -s https://install.zerotier.com | sudo bash &>/dev/null
   if [[ -n ${1} ]]
   then
     # make sure w starting with new identity?
@@ -2913,7 +2933,7 @@ _zt_get_address() {
 
 # a lot of assumptions - hey yeahhhh...
 _setup_remote_host() {
-local _host="${1}" _name _val _asroot=0 _subnet _overlay _zt_net _zt_node _first_ip _start_ip _end_ip _netmask _prefix _ip _net _ssh_port
+local _host="${1}" _name _val _asroot=0 _subnet _overlay _zt_net _zt_net_address _zt_node _first_ip _start_ip _end_ip _netmask _prefix _ip _net _ssh_port _zt_ip=""
   shift
   while [[ -n ${1} ]]
   do
@@ -2932,10 +2952,26 @@ local _host="${1}" _name _val _asroot=0 _subnet _overlay _zt_net _zt_node _first
         fi
         shift
         ;;
-      zt-network:*|zt-net:*)
+      zt-network:*|zt-net:*|zt:*)
         if ! _zt_net=$(_extract_param "${1}")
         then
           _abort_script "missing {G}zt-net{N} network name/address"
+        fi
+        if ! _zt_net_address=$(_config_get "/overlay/zt/${_zt_net}/network")
+        then
+          _abort_script "unknown ZT network selected"
+        fi
+        _config_put "/host/${_host}/overlay/zt/network" "${_zt_net}"
+        _config_put "/overlay/zt/current" "${_zt_net}"
+        shift
+        ;;
+      zt-ip:*)
+        if _val=$(_extract_param "${1}")
+        then
+          if _is_ip "${_val}"
+          then
+            _zt_ip="${_val}"
+          fi
         fi
         shift
         ;;
@@ -2959,9 +2995,18 @@ local _host="${1}" _name _val _asroot=0 _subnet _overlay _zt_net _zt_node _first
   then
     _abort_script "{G}subnet{N} prefix not provided"
   fi
-  if [[ -z ${_zt_net} ]]
+  if [[ -z ${_zt_net_address} ]]
   then
-    _zt_net=$(_config_get "/overlay/zt/network") || true
+      if _zt_net=$(_config_get "/overlay/zt/current")
+      then
+        _printf "{Y}WARNING: {N} autoselect ZT netowork: {G}%s{N}\n" "${_zt_net}"
+        if ! _zt_net_address=$(_config_get "/overlay/zt/${_zt_net}/network")
+        then
+          _abort_script "unknown ZT network selected"
+        fi
+      else
+          _abort_script "no ZT network definied"
+      fi
   fi
   _ip=$(_ip_from_cidr $_subnet)
   _prefix=$(_cidr_from_cidr ${_subnet})
@@ -3026,10 +3071,10 @@ local _host="${1}" _name _val _asroot=0 _subnet _overlay _zt_net _zt_node _first
   then
     _abort_script "configuration failed..."
   fi
-  if [[ -n ${_zt_net} ]]
+  if [[ -n ${_zt_net_address} ]]
   then
     _printf "Installing Zerotier-One\n"
-    if ! _ssh "${_host}" install-zt:${_zt_net}
+    if ! _ssh "${_host}" install-zt:${_zt_net_address}
     then
       _abort_script "zt installation failed"
     fi
@@ -3040,27 +3085,29 @@ local _host="${1}" _name _val _asroot=0 _subnet _overlay _zt_net _zt_node _first
     # for ZT API call (later)
     _printf "ZT node address: {G}%s\n" "${_zt_node}"
     _config_put "/host/${_host}/overlay/zt/node" "${_zt_node}"
-    _printf "Autoregistration in ZeroTier One network.\n"
+    _printf "Auto register in ZeroTier One network: "
     _done=0
     _cnt=1
     while [[ $_done -eq 0 ]]
     do
-      if [[ $_cnt -gt 100 ]]
+      if [[ $_cnt -gt 60 ]]
       then
         break
       fi
-      if _val=$(_zt_authorize_node "${_zt_node}")
+      if _val=$(_zt_authorize_node "${_zt_node}" "${_zt_ip}")
       then
         if [[ -n ${_val} ]]
         then
           break
         fi
       fi
-      sleep 0.5
+      echo -n "."
+      sleep 1
       ((_cnt++)) || true
     done
     if [[ -n ${_val} ]]
     then
+      _printf " {G}OK{N}\n"
       _printf "NodeIP: {G}%s\n" "${_val}"
       if _is_ip "${_val}"
       then
@@ -3075,6 +3122,8 @@ local _host="${1}" _name _val _asroot=0 _subnet _overlay _zt_net _zt_node _first
         _printf "Change ZT node name to {G}%s\n" "${_host}"
       fi
       _config_put "/host/${_host}/subnet" "${_subnet}"
+    else
+      _printf " {R}FAIL{N}\n"
     fi
     #_printf "At the moment:\n"
     #_printf " Confirm node join in ZT web UI and add route to: ${_subnet}\n"
@@ -3115,23 +3164,29 @@ local _user="${1}"
     chown -R ${_user}:${_user} .ssh
   fi
   gpasswd -a ${_user} libvirt
+  # make sure home folder is accesible for libvirt (for Ubuntu 22.04 is not by default)
+  chmod o+x .
 }
 
 _zt_api_get() {
-local _api _network _resp _val _url="$1" _extract="$2" _mode="${3}"
+local _ztnet _api _network _resp _val _url="$1" _extract="$2" _mode="${3}"
   if ! command -v jq &>/dev/null
   then
     return 1
   fi
-  if ! _api=$(_config_get "/overlay/zt/api")
+  if ! _ztnet=$(_config_get "/overlay/zt/current")
+  then
+    _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
+  fi
+  if ! _api=$(_config_get "/overlay/zt/${_ztnet}/api")
   then
     return 1
   fi
-  if ! _network=$(_config_get "/overlay/zt/network")
+  if ! _network=$(_config_get "/overlay/zt/${_ztnet}/network")
   then
     return 1
   fi
-  if ! _resp=$(curl -sf -X GET -H "Content-Type: application/json" -H "Authorization: bearer ${_api}"  "${ZT_API}/network/${_network}${_url}")
+  if ! _resp=$(curl --connect-timeout "${CURL_TIMEOUT}" -sf -X GET -H "Content-Type: application/json" -H "Authorization: bearer ${_api}"  "${ZT_API}/network/${_network}${_url}")
   then
     return 1
   fi
@@ -3143,28 +3198,32 @@ local _api _network _resp _val _url="$1" _extract="$2" _mode="${3}"
 }
 
 _zt_api_set() {
-local _api _network _resp _val
+local _api _network _ztnet _resp _val
   if ! command -v jq &>/dev/null
   then
     return 1
   fi
-  if ! _api=$(_config_get "/overlay/zt/api")
+  if ! _ztnet=$(_config_get "/overlay/zt/current")
+  then
+    _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
+  fi
+  if ! _api=$(_config_get "/overlay/zt/${_ztnet}/api")
   then
     return 1
   fi
-  if ! _network=$(_config_get "/overlay/zt/network")
+  if ! _network=$(_config_get "/overlay/zt/${_ztnet}/network")
   then
     return 1
   fi
   if [[ $# -eq 2 ]]
   then
-    if curl -sf -o /dev/null -X POST -H "Content-Type: application/json" -H "Authorization: bearer ${_api}" --data "${2}" "${ZT_API}/network/${_network}${1}"
+    if curl --connect-timeout "${CURL_TIMEOUT}" -o /dev/null -sf -X POST -H "Content-Type: application/json" -H "Authorization: bearer ${_api}" --data "${2}" "${ZT_API}/network/${_network}${1}"
     then
       return 0
     fi
     return 1
   else
-    if ! _resp=$(curl -sf -X POST -H "Content-Type: application/json" -H "Authorization: bearer ${_api}" --data "${3}" "${ZT_API}/network/${_network}${1}")
+    if ! _resp=$(curl --connect-timeout "${CURL_TIMEOUT}" -sf -X POST -H "Content-Type: application/json" -H "Authorization: bearer ${_api}" --data "${3}" "${ZT_API}/network/${_network}${1}")
     then
       return 1
     fi
@@ -3177,22 +3236,26 @@ local _api _network _resp _val
 }
 
 _zt_api_delete() {
-local _api _network _resp _val
+local _api _network _ztnet _resp _val
   if ! command -v jq &>/dev/null
   then
     return 1
   fi
-  if ! _api=$(_config_get "/overlay/zt/api")
+  if ! _ztnet=$(_config_get "/overlay/zt/current")
+  then
+    _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
+  fi
+  if ! _api=$(_config_get "/overlay/zt/${_ztnet}/api")
   then
     return 1
   fi
-  if ! _network=$(_config_get "/overlay/zt/network")
+  if ! _network=$(_config_get "/overlay/zt/${_ztnet}/network")
   then
     return 1
   fi
   if [[ -n ${1} ]]
   then
-    if curl -sf -o /dev/null -X DELETE -H "Content-Type: application/json" -H "Authorization: bearer ${_api}" "${ZT_API}/network/${_network}${1}"
+    if curl --connect-timeout "${CURL_TIMEOUT}" -sf -o /dev/null -X DELETE -H "Content-Type: application/json" -H "Authorization: bearer ${_api}" "${ZT_API}/network/${_network}${1}"
     then
       return 0
     fi
@@ -3229,11 +3292,20 @@ local _routes _diff
 }
 
 _zt_authorize_node() {
-local _result
-  if _result=$(_zt_api_set "/member/${1}" ".config.ipAssignments[]" '{"config":{"authorized": true}}' -r)
+local _result _ip="${2}"
+  if [[ -n ${_ip} ]]
   then
-    echo -n "${_result}"
-    return 0
+    if _result=$(_zt_api_set "/member/${1}" ".config.ipAssignments[]" "{\"config\":{\"authorized\": true,\"ipAssignments\": [ \"${_ip}\"]}}" -r)
+    then
+      echo -n "${_result}"
+      return 0
+    fi
+  else
+    if _result=$(_zt_api_set "/member/${1}" ".config.ipAssignments[]" '{"config":{"authorized": true}}' -r)
+    then
+      echo -n "${_result}"
+      return 0
+    fi
   fi
   return 1
 }
@@ -3251,7 +3323,7 @@ local _result
 }
 
 _zt_rename_node() {
-  if _zt_api_set "/member/${1}" "{\"name\":\"${2}\"}"
+  if _zt_api_set "/member/${1}" "{\"name\":\"${2}\", \"description\": \"Managed by RSKVM\"}"
   then
     return 0
   fi
@@ -3259,33 +3331,38 @@ _zt_rename_node() {
 }
 
 _zt_verify_api() {
-local _api _network _resp _val
+local _api _network _resp _val _ztnet
   if ! command -v jq &>/dev/null
   then
     _abort_script "missing required command {G}jq{N}"
   fi
-  if ! _api=$(_config_get "/overlay/zt/api")
+  if _ztnet=$(_config_get "/overlay/zt/current")
   then
-    _abort_script "missing ZT {G}API{N} key"
-  fi
-  if ! _network=$(_config_get "/overlay/zt/network")
-  then
-    _abort_script "missing ZT {G}network{N} ID"
-  fi
-  if ! _resp=$(curl -sf -X GET -H "Content-Type: application/json" -H "Authorization: bearer ${_api}"  "${ZT_API}/network/${_network}")
-  then
-    _abort_script "connection to API service failed (wrong configuration?)"
-  fi
-  if _val=$(jq -r .id <<< ${_resp} 2>/dev/null)
-  then
-    if [[ ${_val} == ${_network} ]]
+    if ! _api=$(_config_get "/overlay/zt/${_ztnet}/api")
     then
-      _printf "ZT API: {G}OK\n"
+      _abort_script "missing ZT {G}API{N} key for network ${_ztnet}"
+    fi
+    if ! _network=$(_config_get "/overlay/zt/${_ztnet}/network")
+    then
+      _abort_script "missing ZT {G}network{N} ID for network ${_ztnet}"
+    fi
+    if ! _resp=$(curl --connect-timeout "${CURL_TIMEOUT}" -sf -X GET -H "Content-Type: application/json" -H "Authorization: bearer ${_api}"  "${ZT_API}/network/${_network}")
+    then
+      _abort_script "connection to ZT's API service failed"
+    fi
+    if _val=$(jq -r .id <<< ${_resp} 2>/dev/null)
+    then
+      if [[ ${_val} == ${_network} ]]
+      then
+        _printf "ZT API (${_ztnet}/${_network}): {G}OK\n"
+      else
+        _abort_script "ZT missmatch networks"
+      fi
     else
-      _abort_script "ZT missmatch networks"
+      _abort_script "unable to verify API access"
     fi
   else
-    _abort_script "unable to verify API access"
+    _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
   fi
 }
 
@@ -3313,7 +3390,7 @@ _self_update() {
       fi
     fi
   fi
-  if curl -sL -o /usr/bin/rskvm https://github.com/rjsocha/rskvm/releases/latest/download/rskvm
+  if curl --connect-timeout "${CURL_TIMEOUT}" -sL -o /usr/bin/rskvm https://github.com/rjsocha/rskvm/releases/latest/download/rskvm
   then
     chmod +x /usr/bin/rskvm
     exec /usr/bin/rskvm me:install
@@ -3410,27 +3487,54 @@ local _val
       _config_vm "$@"
       exit
       ;;
-    zt:api:*|zt::api:*)
+    overlay:zt:name:*)
       if _val=$(_extract_param "${1}")
       then
         shift
-        _config_put "/overlay/zt/api" "${_val}"
-      else
-        _abort_script "missing {G}API{N}  key for ZeroTier One overlay network"
+        if [[ ${_val} =~ ^[a-zA-Z][a-zA-Z0-9_-]+$ ]]
+        then
+          _config_put "/overlay/zt/${_val}/" ""
+          _config_put "/overlay/zt/current" "${_val}"
+        else
+          _abort_script "wrong name for overlay network"
+        fi
       fi
+      exit
       ;;
-    zt:network:*|zt::network:*)
-      if _val=$(_extract_param "${1}")
+    overlay:zt:api:*)
+      if _ztnet=$(_config_get "/overlay/zt/current")
       then
-        shift
-        _config_put "/overlay/zt/network" "${_val}"
+        if _val=$(_extract_param "${1}")
+        then
+          shift
+          _config_put "/overlay/zt/${_ztnet}/api" "${_val}"
+        else
+          _abort_script "missing {G}API{N} key for ZeroTier One overlay network"
+        fi
       else
-        _abort_script "missing {G}network{N} ID for ZeroTier One overlay network"
+        _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
       fi
+      exit
       ;;
-    zt:verify|zt::verify)
+    overlay:zt:network:*)
+      if _ztnet=$(_config_get "/overlay/zt/current")
+      then
+        if _val=$(_extract_param "${1}")
+        then
+          shift
+          _config_put "/overlay/zt/${_ztnet}/network" "${_val}"
+        else
+          _abort_script "missing {G}network{N} ID for ZeroTier One overlay network"
+        fi
+      else
+        _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
+      fi
+      exit
+      ;;
+    overlay:zt:verify)
       shift
       _zt_verify_api
+      exit
       ;;
     ssh:*)
       if _val=$(_extract_param "${1}")
