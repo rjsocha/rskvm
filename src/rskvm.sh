@@ -1481,7 +1481,7 @@ local _name="${1}" _info _mac _bridge _ip
     _config_default_bridge
     _bridge=$BRIDGE
   fi
-  if _mac=$(LANG=C virsh domiflist "${_name}" | fgrep "${_bridge}" | egrep -i -o '([a-f0-9][a-f0-9]:){5}[a-f0-9][a-f0-9]')
+  if _mac=$(LANG=C virsh domiflist "${_name}" 2>/dev/null | fgrep "${_bridge}" | egrep -i -o '([a-f0-9][a-f0-9]:){5}[a-f0-9][a-f0-9]')
   then
     if _info=$(LANG=C virsh domifaddr --domain "${_name}" --full --source=agent 2>/dev/null | fgrep -i "${_mac}" | fgrep -i ipv4 | egrep -o "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
     then
