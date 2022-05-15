@@ -33,6 +33,7 @@
 set -eE
 
 export ME=rskvm
+export NSURI="http://rskvm.socha.it/"
 export PREFERED_TEMPLATE=(ubuntu-20.04 debian-10 ubuntu-18.04)
 export DEFAULT_RAM=1024
 export DEFAULT_CPU=1
@@ -1556,12 +1557,12 @@ local _uuid _list _desc _state _title _os _color _protected _name _me _quiet="${
     then
       continue
     fi
-    if [[ ${_desc} =~ hidden ]]
+    if _is_vm_hidden "${_uuid}"
     then
       continue
     fi
     _protected=0
-    if [[ ${_desc} =~ protected ]]
+    if _is_vm_protected "${_uuid}"
     then
       _protected=1
     fi
@@ -1967,7 +1968,7 @@ local _rest=()
   then
     _cpu=0
   fi
-  if [[ ! ${_do} =~ ^(delete|create|create-wait|query|start|stop|console|viewer)$ ]]
+  if [[ ! ${_do} =~ ^(delete|create|create-wait|query|start|stop|console|viewer|guard|protect|unguard|unprotect|hide|unhide)$ ]]
   then
     _abort_script "unknow {G}action{N}: {Y}${_do}"
   fi
@@ -2122,6 +2123,104 @@ local _name="${1}" _host="${2}" _template="${3}" _wait_params _ip _done=0 _cnt=0
   fi
 }
 
+_is_vm_hidden() {
+local _name="${1}"
+  if virsh metadata --config --domain "${_name}" --uri "${NSURI}hide" &>/dev/null
+  then
+    return 0
+  fi
+  return 1
+}
+
+_is_vm_protected() {
+local _name="${1}"
+  if virsh metadata --config --domain "${_name}" --uri "${NSURI}protect" &>/dev/null
+  then
+    return 0
+  fi
+  return 1
+}
+
+_vm_protect() {
+local _name="${1}" _desc
+  if [[ -n "${_name}" ]]
+  then
+    if ! _desc=$(LANG=C virsh desc "${_name}" 2>/dev/null)
+    then
+      _abort_script "virtual machine {G}%s{N} not found" "${_name}"
+    fi
+    if [[ ! ${_desc} =~ rskvm ]]
+    then
+      _abort_script "virtual machine not supported by $ME"
+    fi
+    _verbose_printf "Setting protected state on {G}%s{N}.\n" "${_name}"
+    if ! LANG=C virsh metadata --live --config --domain "${_name}" --uri "${NSURI}protect" --key 'rskvm-protect' --set '<enable/>' &>/dev/null
+    then
+      _abort_script "Unable to set protected state on {G}%s{N}..." "${_name}"
+    fi
+  fi
+}
+
+_vm_unprotect() {
+local _name="${1}" _desc
+  if [[ -n "${_name}" ]]
+  then
+    if ! _desc=$(LANG=C virsh desc "${_name}" 2>/dev/null)
+    then
+      _abort_script "virtual machine {G}%s{N} not found" "${_name}"
+    fi
+    if [[ ! ${_desc} =~ rskvm ]]
+    then
+      _abort_script "virtual machine not supported by $ME"
+    fi
+    _verbose_printf "Setting unprotected state on {G}%s{N}.\n" "${_name}"
+    if ! LANG=C virsh metadata --live --config --domain "${_name}" --uri "${NSURI}protect" --remove &>/dev/null
+    then
+      _abort_script "Unable to set unprotected state on {G}%s{N}..." "${_name}"
+    fi
+  fi
+}
+
+_vm_hide() {
+local _name="${1}" _desc
+  if [[ -n "${_name}" ]]
+  then
+    if ! _desc=$(LANG=C virsh desc "${_name}" 2>/dev/null)
+    then
+      _abort_script "virtual machine {G}%s{N} not found" "${_name}"
+    fi
+    if [[ ! ${_desc} =~ rskvm ]]
+    then
+      _abort_script "virtual machine not supported by $ME"
+    fi
+    _verbose_printf "Setting hidden state on {G}%s{N}.\n" "${_name}"
+    if ! LANG=C virsh metadata --live --config --domain "${_name}" --uri "${NSURI}hide" --key 'rskvm-hide' --set '<enable/>' &>/dev/null
+    then
+      _abort_script "Unable to set hidden state on {G}%s{N}..." "${_name}"
+    fi
+  fi
+}
+
+_vm_unhide() {
+local _name="${1}" _desc
+  if [[ -n "${_name}" ]]
+  then
+    if ! _desc=$(LANG=C virsh desc "${_name}" 2>/dev/null)
+    then
+      _abort_script "virtual machine {G}%s{N} not found" "${_name}"
+    fi
+    if [[ ! ${_desc} =~ rskvm ]]
+    then
+      _abort_script "virtual machine not supported by $ME"
+    fi
+    _verbose_printf "Setting unhidden state on {G}%s{N}.\n" "${_name}"
+    if ! LANG=C virsh metadata --live --config --domain "${_name}" --uri "${NSURI}hide" --remove &>/dev/null
+    then
+      _abort_script "Unable to set unhidden state on {G}%s{N}..." "${_name}"
+    fi
+  fi
+}
+
 _vm_delete() {
 local _name="${1}" _desc
   if [[ -n "${_name}" ]]
@@ -2134,7 +2233,7 @@ local _name="${1}" _desc
     then
       _abort_script "virtual machine not supported by $ME"
     fi
-    if [[ ${_desc} =~ protected ]]
+    if _is_vm_protected "${_name}"
     then
       _abort_script "virtual machine {G}%s{N} is protected" "${_name}"
     fi
@@ -2391,6 +2490,18 @@ local _rest=() _val _remote _action _hash _remote_hash
       --view|--viewer)
         _action="viewer"
         ;;
+      --protect|--guard)
+        _action="protect"
+        ;;
+      --unprotect|--unguard)
+        _action="unprotect"
+        ;;
+      --hide)
+        _action="hide"
+        ;;
+      --unhide)
+        _action="unhide"
+        ;;
       *)
         _rest+=("${@}")
         break
@@ -2439,6 +2550,22 @@ local _rest=() _val _remote _action _hash _remote_hash
         ;;
       delete)
         _vm_delete "${RSKVM_NAME}"
+        ;;
+      protect|guard)
+        _vm_protect "${RSKVM_NAME}"
+        exit 0
+        ;;
+      unprotect|unguard)
+        _vm_unprotect "${RSKVM_NAME}"
+        exit 0
+        ;;
+      hide)
+        _vm_hide "${RSKVM_NAME}"
+        exit 0
+        ;;
+      unhide)
+        _vm_unhide "${RSKVM_NAME}"
+        exit 0
         ;;
       console)
         ;;
