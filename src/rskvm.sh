@@ -2545,7 +2545,7 @@ local _rest=() _val _remote _action _hash _remote_hash
         _val=$(_vm_get_ip4_addr "${RSKVM_NAME}")
         if [[ -n ${_val} ]]
         then
-          _printf "{Y}%s\n" "${_val}"
+          _print_line "${_val}"
         fi
         ;;
       delete)
