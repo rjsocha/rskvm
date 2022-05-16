@@ -2553,12 +2553,12 @@ local _rest=() _val _remote _action _hash _remote_hash
     _config_default_bridge
     case "${RSKVM_DO}" in
       start)
-        virsh start --domain "${RSKVM_NAME}"
+        virsh start --domain "${RSKVM_NAME}" &>>~/.rskvm.log || true
         ;;
       stop)
         if ! virsh shutdown --mode agent --domain "${RSKVM_NAME}" &>>~/.rskvm.log
         then
-          virsh shutdown --domain "${RSKVM_NAME}" &>>~/.rskvm.log
+          virsh shutdown --domain "${RSKVM_NAME}" &>>~/.rskvm.log || true
         fi
         ;;
       create-wait|create)
