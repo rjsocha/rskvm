@@ -1880,7 +1880,7 @@ local _image=$1 _val _tmp
   fi
 }
 
-# [?+-]name[/template][@host][:ram][:cpu] [host:name] [template:name] [ram:N] [cpu:N] [name:vm-name] [do:delete|create|query]
+# [?+-^]name[/template][@host][:ram][:cpu] [host:name] [template:name] [ram:N] [cpu:N] [name:vm-name] [do:delete|create|query]
 _vm_parse_spec() {
 local _cmd _tmp
 local _do _host _ram _cpu _template _name
@@ -1905,6 +1905,15 @@ local _rest=()
       if [[ -z ${_do} ]] || [[ ${_do} == "create-wait" ]] || [[ ${_do} == "create" ]]
       then
         _do="create-wait"
+      else
+        _abort_script "other action selected: {Y}%s" "${_do}"
+      fi
+    elif [[ ${_cmd::1} == "^" ]]
+    then
+      _cmd="${_cmd:1}"
+      if [[ -z ${_do} ]] || [[ ${_do} == "exists" ]]
+      then
+        _do="exists"
       else
         _abort_script "other action selected: {Y}%s" "${_do}"
       fi
@@ -1968,7 +1977,7 @@ local _rest=()
   then
     _cpu=0
   fi
-  if [[ ! ${_do} =~ ^(delete|create|create-wait|query|start|stop|console|viewer|guard|protect|unguard|unprotect|hide|unhide)$ ]]
+  if [[ ! ${_do} =~ ^(delete|create|create-wait|query|start|stop|console|viewer|guard|protect|unguard|unprotect|hide|unhide|exists)$ ]]
   then
     _abort_script "unknow {G}action{N}: {Y}${_do}"
   fi
@@ -2140,6 +2149,21 @@ local _name="${1}"
   fi
   return 1
 }
+_is_vm_exists() {
+local _name="${1}" _desc
+  if [[ -n "${_name}" ]]
+  then
+    if _desc=$(LANG=C virsh desc "${_name}" 2>/dev/null)
+    then
+      if [[ ${_desc} =~ rskvm ]]
+      then
+        return 0
+      fi
+    fi
+  fi
+  return 1
+}
+
 
 _vm_protect() {
 local _name="${1}" _desc
@@ -2502,6 +2526,9 @@ local _rest=() _val _remote _action _hash _remote_hash
       --unhide)
         _action="unhide"
         ;;
+      --exists|--exist)
+        _action="exists"
+        ;;
       *)
         _rest+=("${@}")
         break
@@ -2545,8 +2572,17 @@ local _rest=() _val _remote _action _hash _remote_hash
         _val=$(_vm_get_ip4_addr "${RSKVM_NAME}")
         if [[ -n ${_val} ]]
         then
-          _print_line "${_val}"
+          printf "%s\n" "${_val}"
         fi
+        ;;
+      exists)
+        if _is_vm_exists "${RSKVM_NAME}"
+        then
+          echo -n "1"
+        else
+          echo -n "0"
+        fi
+        exit 0
         ;;
       delete)
         _vm_delete "${RSKVM_NAME}"
@@ -3559,6 +3595,14 @@ _check_runtime() {
   if ! command -v ssh &>/dev/null
   then
     _abort_script "{G}ssh{R} is required..."
+  fi
+  if ! command -v ssh &>/dev/null
+  then
+    _abort_script "{G}ssh{R} is required..."
+  fi
+  if ! command -v jq &>/dev/null
+  then
+    _abort_script "{G}jq{R} is required..."
   fi
 }
 
