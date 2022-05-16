@@ -1,0 +1,9 @@
+#!/bin/bash
+for _host in $(rskvm -c list)
+do
+  _addr=$(rskvm -c host:${_host} show:address)
+  _port=$(rskvm -c host:${_host} show:port)
+  _port=${_port:=22}
+  echo -n "${_host} / ${_addr}: "
+  ssh -p ${_port} -- root@${_addr} rskvm me:update
+done
