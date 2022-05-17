@@ -27,6 +27,11 @@
 #    rskvm config:host host:<NAME> address:<FQDN> user:<USER> port:<SSH-PORT>
 #    rskvm setup:host:vm1 zt:<ZT-NAME> subnet:10.244.244.0/24 [zt-ip:<ZT-NODE-IP>]
 #
+#  Templates:
+#
+#    rskvm update:templates
+#    rskvm image:backing
+#
 # EOU
 # Above EOU tag is required  as a mark of End Of Usage
 
@@ -1977,7 +1982,7 @@ local _rest=()
   then
     _cpu=0
   fi
-  if [[ ! ${_do} =~ ^(delete|create|create-wait|query|start|stop|console|viewer|guard|protect|unguard|unprotect|hide|unhide|exists)$ ]]
+  if [[ ! ${_do} =~ ^(delete|create|create-wait|query|start|stop|console|viewer|guard|protect|unguard|unprotect|hide|unhide|exists|commit)$ ]]
   then
     _abort_script "unknow {G}action{N}: {Y}${_do}"
   fi
@@ -2149,6 +2154,7 @@ local _name="${1}"
   fi
   return 1
 }
+
 _is_vm_exists() {
 local _name="${1}" _desc
   if [[ -n "${_name}" ]]
@@ -2164,6 +2170,20 @@ local _name="${1}" _desc
   return 1
 }
 
+_vm_commit_backing() {
+local _vm="${1}" _disk _other
+  if _is_vm_exists "${_vm}"
+  then
+    _vm_start "${_vm}"
+    virsh domblklist "${_vm}" | tail -2 | egrep . | while read _disk _other
+    do
+      _printf "Comitting {G}%s{N} on {Y}%s\n" "${_disk}" "${_vm}"
+      virsh blockpull --domain "${_vm}" "${_disk}" --wait --verbose
+    done
+  else
+    _abort_script "no such vm {G}%s" "${_vm}"
+  fi
+}
 
 _vm_protect() {
 local _name="${1}" _desc
@@ -2534,6 +2554,9 @@ local _rest=() _val _remote _action _hash _remote_hash
       --exists|--exist)
         _action="exists"
         ;;
+      --commit)
+        _action="commit"
+         ;;
       *)
         _rest+=("${@}")
         break
@@ -2591,6 +2614,9 @@ local _rest=() _val _remote _action _hash _remote_hash
         ;;
       delete)
         _vm_delete "${RSKVM_NAME}"
+        ;;
+      commit)
+        _vm_commit_backing "${RSKVM_NAME}"
         ;;
       protect|guard)
         _vm_protect "${RSKVM_NAME}"
@@ -3610,6 +3636,16 @@ _check_runtime() {
     _abort_script "{G}jq{R} is required..."
   fi
 }
+_show_backing_templates() {
+local _host="${1}" _image _backing
+  for _image in $(find "${VM_STORAGE}" -type f -printf "%P\n")
+  do
+    if _backing=$(LANG=C qemu-img info --force-share --output=json "${VM_STORAGE}/${_image}" | jq -er '."full-backing-filename"')
+    then
+      echo  "${_image} ${_backing#${TEMPLATES}/}"
+    fi
+  done
+}
 
 main() {
 local _val
@@ -3717,6 +3753,11 @@ local _val
       else
         _abort_script "missing {G}name@host{N} for ssh connection"
       fi
+      exit
+      ;;
+    image:backing|--image-backing)
+      shift
+      _show_backing_templates "$@"
       exit
       ;;
   esac
