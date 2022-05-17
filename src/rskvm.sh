@@ -2327,6 +2327,11 @@ local _name="${1}" _host="${2}" _uri _addr
   fi
 }
 
+_vm_start() {
+local _vm="${1}"
+  virsh start --domain "${_vm}" &>>~/.rskvm.log || true
+}
+
 # Process global options
 _vm_manager() {
 local _args=() _val
@@ -2553,7 +2558,7 @@ local _rest=() _val _remote _action _hash _remote_hash
     _config_default_bridge
     case "${RSKVM_DO}" in
       start)
-        virsh start --domain "${RSKVM_NAME}" &>>~/.rskvm.log || true
+        _vm_start "${RSKVM_NAME}"
         ;;
       stop)
         if ! virsh shutdown --mode agent --domain "${RSKVM_NAME}" &>>~/.rskvm.log
