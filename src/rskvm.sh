@@ -2178,7 +2178,7 @@ local _name="${1}" _desc
       _abort_script "virtual machine not supported by $ME"
     fi
     _verbose_printf "Setting protected state on {G}%s{N}.\n" "${_name}"
-    if ! LANG=C virsh metadata --live --config --domain "${_name}" --uri "${NSURI}protect" --key 'rskvm-protect' --set '<enable/>' &>/dev/null
+    if ! LANG=C virsh metadata --config --domain "${_name}" --uri "${NSURI}protect" --key 'rskvm-protect' --set '<enable/>' &>/dev/null
     then
       _abort_script "Unable to set protected state on {G}%s{N}..." "${_name}"
     fi
@@ -2198,7 +2198,7 @@ local _name="${1}" _desc
       _abort_script "virtual machine not supported by $ME"
     fi
     _verbose_printf "Setting unprotected state on {G}%s{N}.\n" "${_name}"
-    if ! LANG=C virsh metadata --live --config --domain "${_name}" --uri "${NSURI}protect" --remove &>/dev/null
+    if ! LANG=C virsh metadata --config --domain "${_name}" --uri "${NSURI}protect" --remove &>/dev/null
     then
       _abort_script "Unable to set unprotected state on {G}%s{N}..." "${_name}"
     fi
@@ -2218,7 +2218,7 @@ local _name="${1}" _desc
       _abort_script "virtual machine not supported by $ME"
     fi
     _verbose_printf "Setting hidden state on {G}%s{N}.\n" "${_name}"
-    if ! LANG=C virsh metadata --live --config --domain "${_name}" --uri "${NSURI}hide" --key 'rskvm-hide' --set '<enable/>' &>/dev/null
+    if ! LANG=C virsh metadata --config --domain "${_name}" --uri "${NSURI}hide" --key 'rskvm-hide' --set '<enable/>' &>/dev/null
     then
       _abort_script "Unable to set hidden state on {G}%s{N}..." "${_name}"
     fi
@@ -2238,7 +2238,7 @@ local _name="${1}" _desc
       _abort_script "virtual machine not supported by $ME"
     fi
     _verbose_printf "Setting unhidden state on {G}%s{N}.\n" "${_name}"
-    if ! LANG=C virsh metadata --live --config --domain "${_name}" --uri "${NSURI}hide" --remove &>/dev/null
+    if ! LANG=C virsh metadata --config --domain "${_name}" --uri "${NSURI}hide" --remove &>/dev/null
     then
       _abort_script "Unable to set unhidden state on {G}%s{N}..." "${_name}"
     fi
