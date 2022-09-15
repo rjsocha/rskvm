@@ -11,6 +11,7 @@
 #  rskvm [--verbose] [--force] <[--full] [--no-config] [?|+|-]name[/template][@host][:ram][:cpu]> <...>
 #  rskvm config::host disable:local +-me:<name> +-host:<name> +-address:<address> +-user:<name> +-auth:<key|agent> +-ssh-key:<key-file> +-port:<ssh-port>
 #  rskvm config::vm +-user:<user>@[<PASSWORD|?>] +-group:<group>@<user> +-ssh-key:<user>@<ssh-public-file> +-profile:<name> get show list
+#  rskvm config::vm profile:<name> generate-ssh-keys:ON|OFF
 #  rskvm setup::host [--force]
 #  rskvm setup::host:<name> overlay-network:zt zt-net:<net> subnet:<prefix>
 #  rskvm me:install me:version
@@ -29,6 +30,8 @@
 #
 #  Templates:
 #
+#    rskvm default-image:<name>
+#    rskvm list:templates
 #    rskvm update:templates
 #    rskvm image:backing
 #
@@ -688,13 +691,23 @@ local  _u _g _val _tmp _ssh _type _hash _comment _from
       done
     done
   fi
+  _printf "{G}%s" "GENERATE SSH KEYS:"
+  if [[ -n $(_config_get "vm/profile/${_runtime[profile]}/generate-ssh-keys") ]]
+  then
+    _printf " {Y}%s\n" "ON"
+  else
+    _printf " {Y}%s\n" "OFF"
+  fi
   return 0
 }
 
 _config_vm_profile_get() {
 local _u _p _g _connfig _val _tmp _ssh _type _hash _comment _from _key
   _config="kvm-cnf-no-net"
-  _config="${_config}!regenerate-ssh-host-keys"
+  if _p=$(_config_get "vm/profile/${_runtime[profile]}/generate-ssh-keys}")
+  then
+    _config="${_config}!regenerate-ssh-host-keys"
+  fi
   if [[ -n $(_config_find_all "vm/profile/${_runtime[profile]}/user/" key) ]]
   then
     for _u in $(_config_find_all "vm/profile/${_runtime[profile]}/user/" key)
@@ -807,6 +820,19 @@ _config_vm_user_rm() {
   _config_rm "vm/profile/${_runtime[profile]}/user/${1}"
 }
 
+_config_vm_generate_ssh_keys() {
+local _opt="$1"
+  if [[ ${_opt,,} == "off" ]]
+  then
+    _config_rm "vm/profile/${_runtime[profile]}/generate-ssh-keys"
+  elif [[ ${_opt,,} == "on" ]]
+  then
+    _config_put "vm/profile/${_runtime[profile]}/generate-ssh-keys" "ON"
+  else
+    _abort_script "ON/OFF is only option supported for generate-ssh-keys"
+  fi
+}
+
 # socha@~/.ssh/id_rsa.pub
 _config_vm_ssh_key_add() {
 local _ssh _size _hash _comment _type _rest _enc
@@ -915,6 +941,10 @@ _config_vm() {
         ;;
       +ssh-key:*|ssh-key:*|+ssh:*|ssh:*)
         _config_vm_ssh_key_add "${1#*:}"
+        shift
+        ;;
+      generate-ssh-keys:*)
+        _config_vm_generate_ssh_keys "${1#*:}"
         shift
         ;;
       -ssh-key:*|-ssh:*)
