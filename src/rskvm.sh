@@ -317,7 +317,7 @@ _verify_hostname() {
 
 _verify_name() {
 
-  if [[ ${1} =~ ^[a-z][a-z0-9-]*[a-z0-9]$ ]]
+  if [[ ${1} =~ ^[a-z][a-z0-9.-]*[a-z0-9]$ ]]
   then
     return 0
   fi
@@ -3279,7 +3279,7 @@ local _host="${1}" _name _val _asroot=0 _subnet _overlay _zt_net _zt_net_address
   _printf "Transfering {Y}%s{N} to host {G}%s\n" "$0" "${_host}"
   if ! cat $0 | _ssh --pass -enone "${_host}" "dd if=/dev/stdin of=/usr/bin/$ME status=none && chmod +x /usr/bin/$ME && rskvm transfer:was-ok"
   then
-    _abort_script "unable to transfer {Y}{ME}{N} to remote host..."
+    _abort_script "unable to transfer {Y}${ME}{N} to remote host..."
   fi
   _printf "Starting configuration process...\n"
   # change this for parameter
@@ -3661,10 +3661,10 @@ _check_runtime() {
   then
     _abort_script "{G}ssh{R} is required..."
   fi
-  if ! command -v jq &>/dev/null
-  then
-    _abort_script "{G}jq{R} is required..."
-  fi
+#  if ! command -v jq &>/dev/null
+#  then
+#    _abort_script "{G}jq{R} is required..."
+#  fi
 }
 _show_backing_templates() {
 local _host="${1}" _image _backing
