@@ -1640,10 +1640,10 @@ local _uuid _list _desc _state _title _os _color _protected _name _me _quiet="${
       if [[ ${_protected} -eq 1 ]]
       then
         _printf "${_color}%-9s{N}" "${_state}"
-        _printf "{R}+{Y}%-30s{C}%-16s{N}%s\n" "${_name}" "${_ip}"  "${_os}"
+        _printf "{R}+{Y}%-40s{C}%-16s{N}%s\n" "${_name}" "${_ip}"  "${_os}"
       else
         _printf "${_color}%-10s{N}" "${_state}"
-        _printf "{Y}%-30s{C}%-16s{N}%s\n" "${_name}" "${_ip}" "${_os}"
+        _printf "{Y}%-40s{C}%-16s{N}%s\n" "${_name}" "${_ip}" "${_os}"
       fi
     fi
   done
