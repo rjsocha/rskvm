@@ -3710,7 +3710,7 @@ local _template _image
     do
       rm -f -- "${_template}"
     done
-    find "${TEMPLATES}" -empty -type d -delete
+    find "${TEMPLATES}" -mindepth 1 -empty -type d -delete
   fi
   exit
 }
