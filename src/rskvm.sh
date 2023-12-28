@@ -2584,7 +2584,7 @@ local _rest=() _val _remote _action _hash _remote_hash
       --exists|--exist)
         _action="exists"
         ;;
-      --commit)
+      --commit|--rebase)
         _action="commit"
          ;;
       *)
@@ -3661,11 +3661,12 @@ _check_runtime() {
   then
     _abort_script "{G}ssh{R} is required..."
   fi
-#  if ! command -v jq &>/dev/null
-#  then
-#    _abort_script "{G}jq{R} is required..."
-#  fi
+  if ! command -v jq &>/dev/null
+  then
+    _abort_script "{G}jq{R} is required..."
+  fi
 }
+
 _show_backing_templates() {
 local _host="${1}" _image _backing
   for _image in $(find "${VM_STORAGE}" -type f -printf "%P\n")
