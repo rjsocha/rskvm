@@ -33,7 +33,8 @@
 #    rskvm default-image:<name>
 #    rskvm list:templates
 #    rskvm update:templates
-#    rskvm image:backing
+#    rskvm --image-unused [--purge]
+#    rskvm --image-used
 #
 # EOU
 # Above EOU tag is required  as a mark of End Of Usage
@@ -3678,6 +3679,42 @@ local _host="${1}" _image _backing
   done
 }
 
+_show_unused_templates() {
+local _template _image
+  IFS=$'\t\n'
+  declare -A used=()
+  declare -a remove=()
+  for _image in $(find "${VM_STORAGE}" -type f -printf "%P\n")
+  do
+    if _backing=$(LANG=C qemu-img info --force-share --output=json "${VM_STORAGE}/${_image}" | jq -er '."full-backing-filename"')
+    then
+      _backing="$(basename "${_backing}")"
+      used[${_backing}]="used"
+    fi
+  done
+  for _image in $(find "${TEMPLATES}" -maxdepth 1 -mindepth 1 -type d -printf "%P\n")
+  do
+    for _template in $(find "${TEMPLATES}/${_image}" -maxdepth 1 -mindepth 1 -type f -printf "%P\n")
+    do
+      if [[ -n ${used[${_template}]+used} ]]
+      then
+        continue
+      fi
+      remove+=( "${TEMPLATES}/${_image}/${_template}" )
+      [[ -n ${1:-} ]] || printf -- "%s/%s/%s\n" "${TEMPLATES}" "${_image}" "${_template}"
+    done
+  done
+  if [[ ${1:-} == "--purge" ]]
+  then
+    for _template in "${remove[@]}"
+    do
+      rm -f -- "${_template}"
+    done
+    find "${TEMPLATES}" -empty -type d -delete
+  fi
+  exit
+}
+
 main() {
 local _val
   case "${1,,}" in
@@ -3786,10 +3823,14 @@ local _val
       fi
       exit
       ;;
-    image:backing|--image-backing)
+    image:backing|image:used|--image-backing|--image-used)
       shift
       _show_backing_templates "$@"
       exit
+      ;;
+    image:unused|--image-unused)
+      shift
+      _show_unused_templates "$@"
       ;;
   esac
   _vm_manager "$@"
