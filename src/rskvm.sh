@@ -31,8 +31,8 @@
 #  Templates:
 #
 #    rskvm default-image:<name>
-#    rskvm list:templates
-#    rskvm update:templates
+#    rskvm --image-list
+#    rskvm --image-update
 #    rskvm --image-unused [--purge]
 #    rskvm --image-used
 #
@@ -2323,7 +2323,7 @@ local _name="${1}" _desc
     fi
     _verbose_printf "Removing VM {G}%s\n" "${_name}"
     virsh destroy --domain "${_name}" &>>~/.rskvm.log || true
-    # Bug in Ubuntu 22.04? 
+    # Bug in Ubuntu 22.04?
     # error: unsupported flags (0x2) in function virStorageBackendVolDeleteLocal
     # removed: --delete-storage-volume-snapshots
     virsh undefine --domain "${_name}" --remove-all-storage --managed-save --snapshots-metadata --checkpoints-metadata --nvram &>>~/.rskvm.log || true
@@ -2427,13 +2427,13 @@ local _args=() _val
         # quick fix for ssh ptty
         #stty -onlcr
         ;;
-      --list-images|--list-templates|--templates|-t|list:images|list::images|list:templates|list::templates)
+      --list-images|--list-templates|--templates|-t|list:images|list::images|list:templates|list::templates|--image-list)
         LIST_IMAGES=1
         ;;
       --flush-images|--flush-templates|flush:images|flush::images|flush:templates|flush::templates)
         FLUSH_IMAGES=1
         ;;
-      --update-images|--update-templates|update:images|update::images|update:templates|update::templates)
+      --update-images|--update-templates|update:images|update::images|update:templates|update::templates|--image-update|--images-update)
         UPDATE_IMAGES=1
         ;;
       default-image:*|default::image:*)
@@ -3680,10 +3680,11 @@ local _host="${1}" _image _backing
 }
 
 _show_unused_templates() {
-local _template _image
+local _template _image _byhash _rel
   IFS=$'\t\n'
   declare -A used=()
   declare -a remove=()
+  _byhash="${CONFIG}/image/alias/by-hash"
   for _image in $(find "${VM_STORAGE}" -type f -printf "%P\n")
   do
     if _backing=$(LANG=C qemu-img info --force-share --output=json "${VM_STORAGE}/${_image}" | jq -er '."full-backing-filename"')
@@ -3696,12 +3697,15 @@ local _template _image
   do
     for _template in $(find "${TEMPLATES}/${_image}" -maxdepth 1 -mindepth 1 -type f -printf "%P\n")
     do
-      if [[ -n ${used[${_template}]+used} ]]
-      then
-        continue
-      fi
+      [[ -z ${used[${_template}]+used} ]] || continue
+      [[ ! -L ${_byhash}/${_template} ]] || continue
       remove+=( "${TEMPLATES}/${_image}/${_template}" )
-      [[ -n ${1:-} ]] || printf -- "%s/%s/%s\n" "${TEMPLATES}" "${_image}" "${_template}"
+      _rel="${TEMPLATES}"
+      if [[ ${_rel} =~ ^${HOME}(/|$) ]]
+      then
+        _rel="~${_rel#${HOME}}"
+      fi
+      [[ -n ${1:-} ]] || printf -- "%s/%s/%s\n" "${_rel}" "${_image}" "${_template}"
     done
   done
   if [[ ${1:-} == "--purge" ]]
