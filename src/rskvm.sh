@@ -1286,14 +1286,16 @@ local _addr _user _default _auth _tmp _key _port _pass=0
 }
 
 _pull_image() {
-local _template=$1 _hash=$2 _url
+local _template=$1 _hash=$2 _url _format=""
   if ! _url=$(_config_get "image/alias/by-hash/${_hash}/url")
   then
     _vm_update_images_quiet
   fi
   if _url=$(_config_get "image/alias/by-hash/${_hash}/url")
   then
-    if curl --connect-timeout "${CURL_TIMEOUT}" -sIf -o /dev/null "${_url}"
+    _format="$(_config_get "image/alias/by-hash/${_hash}/format")" || true
+    _format="${_format:-xz}"
+    if curl --connect-timeout "${CURL_TIMEOUT}" -A "rskvm/1.0" -sIf -o /dev/null "${_url}"
     then
       _verbose_printf "Retrieving image template {G}%s{N} from {Y}%s\n" "${_template}" "${_url}"
       if [[ -f ${TEMPLATES}/${_template} ]]
@@ -1309,13 +1311,28 @@ local _template=$1 _hash=$2 _url
         _abort_script "unable to create image template directory at {Y}%s" "${TEMPLATES}/${_template}/"
       fi
       _printf "{R}{N}"
-      if curl --connect-timeout "${CURL_TIMEOUT}" -#f "${_url}" | xzcat --uncompress --to-stdout --single-stream  | dd of="${TEMPLATES}/${_template}/${_hash}.download" status=none
+      if [[ ${_format} == "xz" ]]
       then
-        mv "${TEMPLATES}/${_template}/${_hash}.download" "${TEMPLATES}/${_template}/${_hash}"
-        _printf "{G}"
-        _verbose_printf "Image {G}%s{N}/{G}%s{N} retrieved successfully!\n" "${_template}" "${_hash}"
+        if curl -A "rskvm/1.0" --connect-timeout "${CURL_TIMEOUT}" -#f "${_url}" | xzcat --uncompress --to-stdout --single-stream  | dd of="${TEMPLATES}/${_template}/${_hash}.download" status=none
+        then
+          mv "${TEMPLATES}/${_template}/${_hash}.download" "${TEMPLATES}/${_template}/${_hash}"
+          _printf "{G}"
+          _verbose_printf "Image {G}%s{N}/{G}%s{N} retrieved successfully!\n" "${_template}" "${_hash}"
+        else
+          _verbose_printf "{Y}WARNING: {N}unable to retrive image {G}%s {N}from {Y}url{N}\n" "${_template}" "${_url}"
+        fi
+      elif [[ ${_format} == "zst" ]]
+      then
+        if curl -A "rskvm/1.0" --connect-timeout "${CURL_TIMEOUT}" -#f "${_url}" | zstdmt -qdfc | dd of="${TEMPLATES}/${_template}/${_hash}.download" status=none
+        then
+          mv "${TEMPLATES}/${_template}/${_hash}.download" "${TEMPLATES}/${_template}/${_hash}"
+          _printf "{G}"
+          _verbose_printf "Image {G}%s{N}/{G}%s{N} retrieved successfully!\n" "${_template}" "${_hash}"
+        else
+          _verbose_printf "{Y}WARNING: {N}unable to retrive image {G}%s {N}from {Y}url{N}\n" "${_template}" "${_url}"
+        fi
       else
-        _verbose_printf "{Y}WARNING: {N}unable to retrive image {G}%s {N}from {Y}url{N}\n" "${_template}" "${_url}"
+        _abort_script "usupported image format: {R}%s" "${_format}"
       fi
     else
       _verbose_printf "{Y}WARNING: {N}unable to locate image {G}%s {N}at {Y}url{N}\n" "${_template}" "${_url}"
@@ -1685,9 +1702,9 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
   _config_rm "/image"
   _config_put "/image/version" "1"
   declare -A _images
-  if curl --connect-timeout "${CURL_TIMEOUT}" -sIf -o /dev/null "${KVMREPO}/catalog"
+  if curl -A "rskvm/1.0" --connect-timeout "${CURL_TIMEOUT}" -sIf -o /dev/null "${KVMREPO}/catalog"
   then
-    if _catalog=$(curl --connect-timeout "${CURL_TIMEOUT}" -sf "${KVMREPO}/catalog")
+    if _catalog=$(curl -A "rskvm/1.0" --connect-timeout "${CURL_TIMEOUT}" -sf "${KVMREPO}/catalog")
     then
       _image=""
       set -- ${_catalog}
@@ -2969,6 +2986,7 @@ local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _e
     _pkgs+=( "gpg-agent" )
     _pkgs+=( "curl" )
     _pkgs+=( "jq" )
+    _pkgs+=( "zstd" )
     if [[ ${_subnet} != "local" ]]
     then
       _pkgs+=( "dnsmasq-base" )
@@ -3665,6 +3683,10 @@ _check_runtime() {
   if ! command -v jq &>/dev/null
   then
     _abort_script "{G}jq{R} is required..."
+  fi
+  if ! command -v zstdmt &>/dev/null
+  then
+    _abort_script "{G}zstdmt{R} is required..."
   fi
 }
 
