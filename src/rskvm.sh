@@ -12,6 +12,7 @@
 #  rskvm config::host disable:local +-me:<name> +-host:<name> +-address:<address> +-user:<name> +-auth:<key|agent> +-ssh-key:<key-file> +-port:<ssh-port>
 #  rskvm config::vm +-user:<user>@[<PASSWORD|?>] +-group:<group>@<user> +-ssh-key:<user>@<ssh-public-file> +-profile:<name> get show list
 #  rskvm config::vm profile:<name> generate-ssh-keys:ON|OFF
+#  rskvm config::rskvm ssh-host:<path>
 #  rskvm setup::host [--force]
 #  rskvm setup::host:<name> overlay-network:zt zt-net:<net> subnet:<prefix>
 #  rskvm me:install me:version
@@ -31,10 +32,7 @@
 #  Templates:
 #
 #    rskvm default-image:<name>
-#    rskvm --image-list
-#    rskvm --image-update
-#    rskvm --image-unused [--purge]
-#    rskvm --image-used
+#    rskvm --image-list | --image-update | --image-unused [--purge] |  rskvm --image-used
 #
 # EOU
 # Above EOU tag is required  as a mark of End Of Usage
@@ -962,6 +960,20 @@ _config_vm() {
   done
 }
 
+_config_rskvm() {
+  while [[ -n $1 ]]
+  do
+    case ${1,,} in
+      ssh-host:*)
+        _config_put "config/rskvm-ssh-host" "${1#*:}"
+        shift
+        ;;
+      *)
+        _abort_script "unknow config option {G}%s\n" "$1"
+    esac
+  done
+}
+
 _mem_info() {
   free -h  --giga -t -w | head -n 2 | cut -c 15-
 }
@@ -1478,8 +1490,13 @@ local _params
   else
     _params+=( --cpu mode=host-passthrough )
   fi
+  if [[ ${_opts} =~ :uefi: ]]
+  then
+    _params+=( --boot uefi )
+  fi
   _params+=( --hvm --virt-type kvm --noautoconsole --import --quiet )
   virt-install "${_params[@]}"
+  _save_ssh_host "${_name}"
   _verbose_printf "{G}%s {Y}created successfully!\n" "${_name}"
 }
 
@@ -1495,6 +1512,39 @@ local _param="${1}"
     return 0
   fi
   return 1
+}
+
+_save_ssh_host() {
+  local _ssh_d
+  if  _ssh_d=$(_config_get "config/rskvm-ssh-host")
+  then
+    if [[ -n ${_ssh_d} ]]
+    then
+      local _ssh_host="${1:-}"
+      [[ -n ${_ssh_host} ]] || return 0
+      mkdir -p "${HOME}/.ssh/${_ssh_d}"
+      {
+        printf -- "Host %s %s.vm\n" "${_ssh_host}" "${_ssh_host}"
+        printf -- "  User root\n"
+      } >"${HOME}/.ssh/${_ssh_d}/${_ssh_host}"
+    fi
+  fi
+}
+
+_remove_ssh_host() {
+  local _ssh_d
+  if  _ssh_d=$(_config_get "config/rskvm-ssh-host")
+  then
+    if [[ -n ${_ssh_d} ]]
+    then
+      local _ssh_host="${1:-}"
+      [[ -n ${_ssh_host} ]] || return 0
+      if [[ -f ${HOME}/.ssh/${_ssh_d}/${_ssh_host} ]]
+      then
+        rm -- "${HOME}/.ssh/${_ssh_d}/${_ssh_host}"
+      fi
+    fi
+  fi
 }
 
 _parse_host() {
@@ -2350,6 +2400,7 @@ local _name="${1}" _desc
       rm -f "${VM_STORAGE}/${_name}.vm"
     fi
   fi
+  _remove_ssh_host "${_name}"
 }
 
 _vm_host_uri() {
@@ -2560,6 +2611,12 @@ local _rest=() _val _remote _action _hash _remote_hash
       --nested)
         RSKVM_OPTS+="nested:"
         ;;
+      --uefi|--efi|-u)
+        RSKVM_OPTS+="uefi:"
+        ;;
+      --bios|-b)
+        RSKVM_OPTS="${RSKVM_OPTS//uefi:/}"
+        ;;
       --no-metadata|--no-config|--noconfig)
         RSKVM_OPTS+="noconfig:"
         ;;
@@ -2717,6 +2774,10 @@ local _rest=() _val _remote _action _hash _remote_hash
     then
       _remote="${_remote} --nested"
     fi
+    if [[ ${RSKVM_OPTS} =~ :uefi: ]]
+    then
+      _remote="${_remote} --uefi"
+    fi
     if _remote_hash=$(_config_get "image/master/${RSKVM_TEMPLATE}/hash")
     then
       _remote="${_remote} hash:${_remote_hash}"
@@ -2725,6 +2786,14 @@ local _rest=() _val _remote _action _hash _remote_hash
     then
       _abort_script "remote ssh invocation failed!"
     fi
+    case "${RSKVM_DO}" in
+      create|create-wait)
+        _save_ssh_host "${RSKVM_NAME}"
+        ;;
+      delete)
+        _remove_ssh_host "${RSKVM_NAME}"
+        ;;
+    esac
   fi
   shift
   if [[ -n ${1} ]]
@@ -3788,6 +3857,11 @@ local _val
     config::vm|config:vm|--config-vm|--vm|-m)
       shift
       _config_vm "$@"
+      exit
+      ;;
+    config::rskvm|config:rskvm|--config-rskvm|--rskvm|-g)
+      shift
+      _config_rskvm "$@"
       exit
       ;;
     overlay:zt:name:*)
