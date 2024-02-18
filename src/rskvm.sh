@@ -2859,6 +2859,10 @@ local _rest=() _val _remote _action _hash _remote_hash
     then
       _remote="${_remote} --uefi"
     fi
+    if [[ ${RSKVM_OPTS} =~ :preferuefi: ]]
+    then
+      _remote="${_remote} --prefer-uefi"
+    fi
     if _remote_hash=$(_config_get "image/master/${RSKVM_TEMPLATE}/hash")
     then
       _remote="${_remote} hash:${_remote_hash}"
