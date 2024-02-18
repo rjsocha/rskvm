@@ -1378,7 +1378,7 @@ vm_create() {
 local _name="${1}" _template="${2}" _ram=${3} _cpu=${4} _opts="${5}" _hash="${6}"
 local _os _variant _info _storage_bus
 local _template_file _template_image _template_format
-local _params _firmware
+local _params _firmware _firmware_verbose
   _check_local_access
   if [[ -z ${VM_STORAGE} ]]
   then
@@ -1494,7 +1494,35 @@ local _params _firmware
       _abort_script "uefi firmware not supported by image"
     fi
   fi
-  _verbose_printf "{G}%s{N}@{G}%s{N}\n  TEMPLATE: {Y}%s{N}\n  TYPE: {Y}%s{N}\n  VARIANT: {Y}%s{N}\n  RAM: {Y}%s{N}\n  CPU: {Y}%s{N}\n" "${_name}" "$(_who_am_i)" "${_template}" "${_os}" "${_variant}" "${_ram}" "${_cpu}"
+  _firmware_verbose=""
+  if [[ -z ${_firmware} ]]
+  then
+    _firmware_verbose+="@BIOS "
+  fi
+  if [[ ${_firmware} =~ :@bios: ]]
+  then
+    _firmware_verbose+="@BIOS "
+  elif [[ ${_firmware} =~ :bios: ]]
+  then
+    _firmware_verbose+="BIOS "
+  fi
+  if [[ ${_firmware} =~ :@uefi: ]]
+  then
+    _firmware_verbose+="@UEFI "
+  elif [[ ${_firmware} =~ :uefi: ]]
+  then
+    _firmware_verbose+="UEFI "
+  fi
+  if [[ ${_opts} =~ :uefi: ]]
+  then
+    _firmware_verbose+=" = UEFI"
+  elif [[ ${_opts} =~ :bios: ]]
+  then
+    _firmware_verbose+=" = BIOS"
+  else
+    _firmware_verbose+=" = BIOS"
+  fi
+  _verbose_printf "{G}%s{N}@{G}%s{N}\n  TEMPLATE: {Y}%s{N}\n  TYPE:     {Y}%s{N}\n  VARIANT:  {Y}%s{N}\n  FIRMWARE: {Y}%s{N}\n  RAM:      {Y}%s{N}\n  CPU:      {Y}%s{N}\n" "${_name}" "$(_who_am_i)" "${_template}" "${_os}" "${_variant}" "${_firmware_verbose}" "${_ram}" "${_cpu}"
 
   _params=()
   _params+=( --name "${_name}" )
@@ -2682,12 +2710,14 @@ local _rest=() _val _remote _action _hash _remote_hash
         RSKVM_OPTS+="nested:"
         ;;
       --update)
+        _verbose_printf "Update templates (local) ...\n"
         _vm_update_images_quiet
         RSKVM_OPTS+=":remoteupdate:"
         ;;
       --remote-update)
         if [[ ${IS_REMOTE} -eq 1 ]]
         then
+          _verbose_printf "Update templates (remote) ...\n"
           _vm_update_images_quiet
         else
           RSKVM_OPTS+=":remoteupdate:"
