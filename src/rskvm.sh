@@ -1378,7 +1378,7 @@ vm_create() {
 local _name="${1}" _template="${2}" _ram=${3} _cpu=${4} _opts="${5}" _hash="${6}"
 local _os _variant _info _storage_bus
 local _template_file _template_image _template_format
-local _params
+local _params _firmware
   _check_local_access
   if [[ -z ${VM_STORAGE} ]]
   then
@@ -1450,6 +1450,49 @@ local _params
   if ! _info=$(_config_get "image/master/${_template}/info")
   then
     _info="UNKNOW"
+  fi
+  if _firmware=$(_config_get "image/master/${_template}/firmware")
+  then
+
+    if [[ ${_opts} =~ :bios: ]] && [[ ! ${_firmware} =~ :bios: ]]
+    then
+      _abort_script "bios firmware requested but not supported by image"
+    fi
+    if [[ ${_opts} =~ :uefi: ]] && [[ ! ${_firmware} =~ :uefi: ]]
+    then
+      _abort_script "uefi firmware requested but not supported by image"
+    fi
+
+    if [[ ${_opts} =~ :uefi: ]]
+    then
+      _opts="${_opts//preferuefi:/}"
+      _opts="${_opts//bios:/}"
+      _opts="${_opts//uefi:/}"
+      _opts+="uefi:"
+    elif [[ ${_opts} =~ :bios: ]]
+    then
+      _opts="${_opts//preferuefi:/}"
+      _opts="${_opts//bios:/}"
+      _opts="${_opts//uefi:/}"
+      _opts+="bios:"
+    elif [[ ${_opts} =~ :preferuefi: ]] && [[ ${_firmware} =~ :uefi: ]]
+    then
+      _opts="${_opts//preferuefi:/}"
+      _opts="${_opts//bios:/}"
+      _opts="${_opts//uefi:/}"
+      _opts+="uefi:"
+    elif [[ ${_firmware} =~ :@bios: ]]
+    then
+      _opts+="bios:"
+    elif [[ ${_firmware} =~ :@uefi: ]]
+    then
+      _opts+="uefi:"
+    fi
+  else
+    if [[ ${_opts} =~ :uefi: ]]
+    then
+      _abort_script "uefi firmware not supported by image"
+    fi
   fi
   _verbose_printf "{G}%s{N}@{G}%s{N}\n  TEMPLATE: {Y}%s{N}\n  TYPE: {Y}%s{N}\n  VARIANT: {Y}%s{N}\n  RAM: {Y}%s{N}\n  CPU: {Y}%s{N}\n" "${_name}" "$(_who_am_i)" "${_template}" "${_os}" "${_variant}" "${_ram}" "${_cpu}"
 
@@ -1766,7 +1809,7 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
             _storage_bus="virtio"
             _image="${1#*:}"
             _check_catalog_present image
-            unset _format _os _variant _aliases _info _hash
+            unset _format _os _variant _aliases _info _hash _firmware
             _images[${_image}]="${_image}"
             _config_put "image/master/${_image}/image" "${_image}"
             ;;
@@ -1790,6 +1833,32 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
             _variant="${1#*:}"
             _check_catalog_present image variant
             _config_put "image/master/${_image}/variant" "${_variant}"
+            ;;
+          firmware:*)
+            local _firmwares _fw _firmware
+            _firmwares="${1#*:}"
+            _check_catalog_present image
+            _firmware=""
+            for _fw in in ${_firmwares//,/ }
+            do
+              [[ -n ${_fw} ]] || continue
+              case "${_fw,,}" in
+                bios)
+                  _firmware+=":bios"
+                  ;;
+                bios+)
+                  _firmware+=":@bios:bios"
+                  ;;
+                uefi+)
+                  _firmware+=":@uefi:uefi"
+                  ;;
+                uefi)
+                  _firmware+=":uefi"
+                  ;;
+              esac
+            done
+            [[ -z ${_firmware} ]] || _firmware+=":"
+            _config_put "image/master/${_image}/firmware" "${_firmware}"
             ;;
           storage-bus:*)
             _storage_bus="${1#*:}"
@@ -2611,11 +2680,23 @@ local _rest=() _val _remote _action _hash _remote_hash
       --nested)
         RSKVM_OPTS+="nested:"
         ;;
+      --prefer-uefi)
+        RSKVM_OPTS="${RSKVM_OPTS//preferuefi:/}"
+        RSKVM_OPTS="${RSKVM_OPTS//uefi:/}"
+        RSKVM_OPTS="${RSKVM_OPTS//bios:/}"
+        RSKVM_OPTS+="preferuefi:"
+        ;;
       --uefi|--efi|-u)
+        RSKVM_OPTS="${RSKVM_OPTS//preferuefi:/}"
+        RSKVM_OPTS="${RSKVM_OPTS//uefi:/}"
+        RSKVM_OPTS="${RSKVM_OPTS//bios:/}"
         RSKVM_OPTS+="uefi:"
         ;;
       --bios|-b)
+        RSKVM_OPTS="${RSKVM_OPTS//preferuefi:/}"
         RSKVM_OPTS="${RSKVM_OPTS//uefi:/}"
+        RSKVM_OPTS="${RSKVM_OPTS//bios:/}"
+        RSKVM_OPTS+="bios:"
         ;;
       --no-metadata|--no-config|--noconfig)
         RSKVM_OPTS+="noconfig:"
