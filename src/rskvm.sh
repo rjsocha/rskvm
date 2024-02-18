@@ -1567,7 +1567,7 @@ _save_ssh_host() {
       [[ -n ${_ssh_host} ]] || return 0
       mkdir -p "${HOME}/.ssh/${_ssh_d}"
       {
-        printf -- "Host %s %s.vm\n" "${_ssh_host}" "${_ssh_host}"
+        printf -- "Host %s\n" "${_ssh_host}"
         printf -- "  User root\n"
       } >"${HOME}/.ssh/${_ssh_d}/${_ssh_host}"
     fi
@@ -1776,6 +1776,7 @@ local _var _name
     fi
   done
 }
+
 _vm_update_images_quiet() {
 local _verbose
   _verbose="${VERBOSE}"
@@ -2680,6 +2681,18 @@ local _rest=() _val _remote _action _hash _remote_hash
       --nested)
         RSKVM_OPTS+="nested:"
         ;;
+      --update)
+        _vm_update_images_quiet
+        RSKVM_OPTS+=":remoteupdate:"
+        ;;
+      --remote-update)
+        if [[ ${IS_REMOTE} -eq 1 ]]
+        then
+          _vm_update_images_quiet
+        else
+          RSKVM_OPTS+=":remoteupdate:"
+        fi
+        ;;
       --prefer-uefi)
         RSKVM_OPTS="${RSKVM_OPTS//preferuefi:/}"
         RSKVM_OPTS="${RSKVM_OPTS//uefi:/}"
@@ -2858,6 +2871,10 @@ local _rest=() _val _remote _action _hash _remote_hash
     if [[ ${RSKVM_OPTS} =~ :uefi: ]]
     then
       _remote="${_remote} --uefi"
+    fi
+    if [[ ${RSKVM_OPTS} =~ :remoteupdate: ]]
+    then
+      _remote="${_remote} --remote-update"
     fi
     if [[ ${RSKVM_OPTS} =~ :preferuefi: ]]
     then
