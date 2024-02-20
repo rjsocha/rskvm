@@ -1565,6 +1565,10 @@ local _params _firmware _firmware_verbose
   then
     _params+=( --boot uefi )
   fi
+  if [[ ${_opts} =~ :noboot: ]]
+  then
+    _params+=( --noreboot )
+  fi
   _params+=( --hvm --virt-type kvm --noautoconsole --import --quiet )
   virt-install "${_params[@]}"
   _save_ssh_host "${_name}"
@@ -1595,6 +1599,7 @@ _save_ssh_host() {
       [[ -n ${_ssh_host} ]] || return 0
       mkdir -p "${HOME}/.ssh/${_ssh_d}"
       {
+        printf -- "#@${RSKVM_HOST}\n"
         printf -- "Host %s\n" "${_ssh_host}"
         printf -- "  User root\n"
       } >"${HOME}/.ssh/${_ssh_d}/${_ssh_host}"
@@ -2759,6 +2764,13 @@ local _rest=() _val _remote _action _hash _remote_hash
       --query)
         _action="query"
         ;;
+      --noboot|--no-boot)
+        RSKVM_OPTS="${RSKVM_OPTS//noboot:/}"
+        RSKVM_OPTS+="noboot:"
+        ;;
+      --boot)
+        RSKVM_OPTS="${RSKVM_OPTS//noboot:/}"
+        ;;
       --delete|--destroy)
         _action="delete"
         ;;
@@ -2820,7 +2832,7 @@ local _rest=() _val _remote _action _hash _remote_hash
         ;;
       create-wait|create)
         vm_create ${RSKVM_NAME} ${RSKVM_TEMPLATE} ${RSKVM_RAM} ${RSKVM_CPU} "${RSKVM_OPTS}" "${_hash}"
-        if [[ ${RSKVM_DO} == "create-wait" ]]
+        if [[ ${RSKVM_DO} == "create-wait" ]] && ! [[ ${RSKVM_OPTS} =~ :noboot: ]]
         then
           _vm_wait_for_me "${RSKVM_NAME}" "$(_who_am_i)" "${RSKVM_TEMPLATE}"
         fi
@@ -2909,6 +2921,10 @@ local _rest=() _val _remote _action _hash _remote_hash
     if [[ ${RSKVM_OPTS} =~ :preferuefi: ]]
     then
       _remote="${_remote} --prefer-uefi"
+    fi
+    if [[ ${RSKVM_OPTS} =~ :noboot: ]]
+    then
+      _remote="${_remote} --no-boot"
     fi
     if _remote_hash=$(_config_get "image/master/${RSKVM_TEMPLATE}/hash")
     then
