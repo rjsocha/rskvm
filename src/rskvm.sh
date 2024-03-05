@@ -1515,12 +1515,9 @@ local _params _firmware _firmware_verbose
   fi
   if [[ ${_opts} =~ :uefi: ]]
   then
-    _firmware_verbose+=" = UEFI"
-  elif [[ ${_opts} =~ :bios: ]]
-  then
-    _firmware_verbose+=" = BIOS"
+    _firmware_verbose+="= UEFI"
   else
-    _firmware_verbose+=" = BIOS"
+    _firmware_verbose+="= BIOS"
   fi
   _verbose_printf "{G}%s{N}@{G}%s{N}\n  TEMPLATE: {Y}%s{N}\n  TYPE:     {Y}%s{N}\n  VARIANT:  {Y}%s{N}\n  FIRMWARE: {Y}%s{N}\n  RAM:      {Y}%s{N}\n  CPU:      {Y}%s{N}\n" "${_name}" "$(_who_am_i)" "${_template}" "${_os}" "${_variant}" "${_firmware_verbose}" "${_ram}" "${_cpu}"
 
@@ -3165,7 +3162,7 @@ local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _e
     elif [[ "${ID}" == "debian" ]]
     then
       case "${VERSION_ID}" in
-        11)
+        11|12)
           ;;
         *)
         _abort_script "unsupported Debian version %s" "${VERSION_ID}"
