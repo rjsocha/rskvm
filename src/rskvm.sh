@@ -1235,11 +1235,11 @@ local _bridge
       _verbose_printf "Autoselecting default bridge: {G}lan0\n"
       _config_put "config/bridge" "lan0"
       export BRIDGE="lan0"
-    elif ip -o link show dev virbr0 &>/dev/null
+    elif ip -o link show dev vm0 &>/dev/null
     then
-      _verbose_printf "Autoselecting default bridge: {G}virbr0\n"
-      _config_put "config/bridge" "virbr0"
-      export BRIDGE="virbr0"
+      _verbose_printf "Autoselecting default bridge: {G}vm0\n"
+      _config_put "config/bridge" "vm0"
+      export BRIDGE="vm0"
     else
       _abort_script "Unable to locate default bridge device"
     fi
@@ -4138,4 +4138,3 @@ else
 fi
 
 main "$@"
-# vim: set tabstop=2 shiftwidth=2 expandtab autoindent nosmartindent :
