@@ -2336,19 +2336,21 @@ local _name="${1}" _host="${2}" _template="${3}" _wait_params _ip _done=0 _cnt=0
 }
 
 _is_vm_hidden() {
-local _name="${1}"
-  if virsh metadata --config --domain "${_name}" --uri "${NSURI}hide" &>/dev/null
-  then
-    return 0
+local _name="${1}" result=""
+  if result=$(virsh metadata --config --domain "${_name}" --uri "${NSURI}hide" 2>/dev/null); then
+    if [[ ${#result} -gt 0 ]]; then
+      return 0
+    fi
   fi
   return 1
 }
 
 _is_vm_protected() {
-local _name="${1}"
-  if virsh metadata --config --domain "${_name}" --uri "${NSURI}protect" &>/dev/null
-  then
-    return 0
+local _name="${1}" result=""
+  if result=$(virsh metadata --config --domain "${_name}" --uri "${NSURI}protect" 2>/dev/null); then
+    if [[ ${#result} -gt 0 ]]; then
+      return 0
+    fi
   fi
   return 1
 }
