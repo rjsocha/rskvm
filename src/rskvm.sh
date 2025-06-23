@@ -1225,11 +1225,11 @@ local _bridge
   then
     export BRIDGE="${_bridge}"
   else
-    if ip -o link show dev rskvm0 &>/dev/null
+    if ip -o link show dev host0 &>/dev/null
     then
-      _verbose_printf "Autoselecting default bridge: {G}rskvm0\n"
-      _config_put "config/bridge" "rskvm0"
-      export BRIDGE="rskvm0"
+      _verbose_printf "Autoselecting default bridge: {G}host0\n"
+      _config_put "config/bridge" "host0"
+      export BRIDGE="host0"
     elif ip -o link show dev lan0 &>/dev/null
     then
       _verbose_printf "Autoselecting default bridge: {G}lan0\n"
