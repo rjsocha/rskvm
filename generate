@@ -2,11 +2,5 @@
 set -eE
 cp -f src/rskvm.sh rskvm
 chmod +x ./rskvm
-for _inc in include/*
-do
-	_var=$(basename ${_inc})
-	_data=$(base64 -w0 "${_inc}")
-	echo "PAYLOAD_${_var^^}=\"${_data}\"" | sed -i '/#PAYLOAD/ r /dev/stdin' rskvm
-done
 _ver=$(date +%Y%m%d%H%M%S)
 echo "_RSKVM_VERSION=\"${_ver}\"" | sed -i '/#PAYLOAD/ r /dev/stdin' rskvm

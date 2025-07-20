@@ -9,25 +9,15 @@
 #
 # Usage:
 #  rskvm [--verbose] [--force] <[--full] [--no-config] [?|+|-]name[/template][@host][:ram][:cpu]> <...>
-#  rskvm config::host disable:local +-me:<name> +-host:<name> +-address:<address> +-user:<name> +-auth:<key|agent> +-ssh-key:<key-file> +-port:<ssh-port>
+#  rskvm -c me:<name> +-host:<name> +-address:<address> +-user:<name> +-auth:<key|agent> +-ssh-key:<key-file> +-port:<ssh-port>
 #  rskvm config::vm +-user:<user>@[<PASSWORD|?>] +-group:<group>@<user> +-ssh-key:<user>@<ssh-public-file> +-profile:<name> get show list
 #  rskvm config::vm profile:<name> generate-ssh-keys:ON|OFF
 #  rskvm config::rskvm ssh-host:<path>
-#  rskvm setup::host [--force]
-#  rskvm setup::host:<name> overlay-network:zt zt-net:<net> subnet:<prefix>
 #  rskvm me:install me:version
-#
-#  Overlay ZT network:
-#
-#    rskvm overlay:zt:name:<ZT-NAME>
-#    rskvm overlay:zt:api:<ZT-API-KEY>
-#    rskvm overlay:zt:network:<ZT-NETWORK-ID>
-#    rskvm overlay:zt:verify
 #
 #  Host setup:
 #
 #    rskvm config:host host:<NAME> address:<FQDN> user:<USER> port:<SSH-PORT>
-#    rskvm setup:host:vm1 zt:<ZT-NAME> subnet:10.244.244.0/24 [zt-ip:<ZT-NODE-IP>]
 #
 #  Templates:
 #
@@ -41,9 +31,9 @@ set -eE
 
 export ME=rskvm
 export NSURI="http://rskvm.socha.it/"
-export PREFERED_TEMPLATE=(ubuntu-20.04 debian-10 ubuntu-18.04)
-export DEFAULT_RAM=1024
-export DEFAULT_CPU=1
+export PREFERED_TEMPLATE=(debian-13)
+export DEFAULT_RAM=2048
+export DEFAULT_CPU=2
 export LIBVIRT_DEFAULT_URI="qemu:///system"
 export KVMREPO="http://image.vm.socha.it"
 export ZT_API="https://my.zerotier.com/api/v1"
@@ -307,25 +297,21 @@ local _path=$1 _type=$2 _key
 }
 
 _verify_hostname() {
-  if [[ ${1} =~ ^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$ ]]
-  then
+  if [[ ${1} =~ ^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$ ]]; then
     return 0
   fi
   return 1
 }
 
 _verify_name() {
-
-  if [[ ${1} =~ ^[a-z][a-z0-9.-]*[a-z0-9]$ ]]
-  then
+  if [[ ${1} =~ ^[a-z][a-z0-9.-]*[a-z0-9]$ ]]; then
     return 0
   fi
   return 1
 }
 
 _require_runtime() {
-  if [[ -n ${_runtime[$1]} ]]
-  then
+  if [[ -n ${_runtime[$1]} ]]; then
     return 0
   fi
   return 1
@@ -438,43 +424,11 @@ local _val
   fi
 }
 
-_config_host_zt_remove() {
-local _host="${1}" _zt_node _zt_address _subnet _zt_net
-
-  if ! _subnet=$(_config_get /host/${_host}/subnet)
-  then
-     _subnet=$(_config_get /host/${_host}/zt_subnet) || true
-  fi
-  if _zt_net=$(_config_get /host/${_host}/overlay/zt/network)
-  then
-    _config_put "/overlay/zt/current" "${_zt_net}"
-  fi
-  if ! _zt_node=$(_config_get /host/${_host}/overlay/zt/node)
-  then
-    _zt_node=$(_config_get /host/${_host}/zt) || true
-  fi
-  if ! _zt_address=$(_config_get /host/${_host}/overlay/zt/address)
-  then
-    _zt_address=$(_config_get /host/${_host}/zt_address) || true
-  fi
-  if [[ -n ${_subnet} ]]
-  then
-    if [[ -n ${_zt_node} ]] && [[ -n ${_zt_address} ]]
-    then
-      _verbose_printf "Removing route for {Y}%s{N} via {G}%s{N} / {G}%s\n" "${_subnet}" "${_zt_node}" "${_zt_address}"
-      _zt_del_route "${_subnet}" "${_zt_address}"
-      _verbose_printf "Removing node {G}%s{N} / {G}%s{N} from network\n" "${_zt_node}" "${_zt_address}"
-      _zt_unauthorize_node "${_zt_node}" >/dev/null
-    fi
-  fi
-}
-
 _config_host_rm() {
   if [[ -n $1 ]]
   then
     if _verify_hostname "$1"
     then
-      _config_host_zt_remove "${1}"
       _config_rm "host/${1}/"
     else
       _abort_script "incorrect hostname {G}%s" "${1}"
@@ -2518,7 +2472,7 @@ local _host="${1}" _uri _addr _user _port
   then
     _uri="${_uri}:${_port}"
   fi
-  _uri="${_uri}/system?command=rskvm-ssh-no-verify"
+  _uri="${_uri}/system"
   echo -n "${_uri}"
 }
 
@@ -3081,175 +3035,10 @@ local _subnet="$1" _first_ip="$2" _start_ip="$3" _end_ip="$4" _net _cidr _netmas
 }
 
 _setup_host() {
-local _user _force=0 _remote=0 _arg _subnet _net _netmask _first_ip _start_ip _end_ip _ssh_port="22" _verbose=0 _pkgs
-  for _arg in $@
-  do
-    case "${_arg,,}" in
-      subnet:*)
-        _subnet=$(_extract_param "${_arg}")
-        ;;
-      net:*)
-        _net=$(_extract_param "${_arg}")
-        IFS="/" read _first_ip _start_ip _end_ip <<< $"${_net}"
-        ;;
-      ssh-port:*)
-        _ssh_port=$(_extract_param "${_arg}")
-        ;;
-      --force)
-        _force=1
-        ;;
-      --remote)
-        _remote=1
-        ;;
-      --verbose)
-        _verbose=1
-        ;;
-    esac
-  done
-  if [[ -z ${_subnet} ]]
-  then
-    _abort_script "{G}subnet{R} parameter is required"
-  fi
-
-  if [[ -z ${_ssh_port} ]]
-  then
-    _ssh_port="22"
-  fi
-
-  if [[ ${_subnet} != "local" ]]
-  then
-    if ! _is_cidr "${_subnet}"
-    then
-      _abort_script "{R}incorrect {G}subnet{R} format"
-    fi
-
-    if ! _is_correct_subnet "${_subnet}"
-    then
-      _abort_script "{R}incorrect {G}subnet{R} address given"
-    fi
-    _netmask=$(_netmask_from_subnet "${_subnet}")
-    if [[ -z ${_first_ip} ]] || [[ -z ${_start_ip} ]] || [[ -z ${_end_ip} ]]
-    then
-      _first_ip=$(_first_ip_from_subnet "${_subnet}")
-      _start_ip=$(_start_ip_from_subnet "${_subnet}")
-      _end_ip=$(_end_ip_from_subnet "${_subnet}")
-    fi
-
-    if ! _is_ip_subnet_valid "${_subnet}" "${_first_ip}" "${_start_ip}" "${_end_ip}"
-    then
-      _abort_script "{R}invalid network specification for {G}subnet"
-    fi
-  fi
-
-  if [[ -n ${FOR_USER} ]]
-  then
-    _user="${FOR_USER}"
-  elif [[ -n ${SUDO_USER} ]]
-  then
-    _user="${SUDO_USER}"
-  else
-    _user="${USER}"
-  fi
-  if [[ -f /etc/os-release ]]
-  then
-    source "/etc/os-release"
-    if [[ "${ID}" == "ubuntu" ]]
-    then
-      case "${VERSION_ID}" in
-        20.04|22.04)
-          ;;
-        *)
-        _abort_script "unsupported Ubuntu version %s" "${VERSION_ID}"
-      esac
-    elif [[ "${ID}" == "debian" ]]
-    then
-      case "${VERSION_ID}" in
-        11|12)
-          ;;
-        *)
-        _abort_script "unsupported Debian version %s" "${VERSION_ID}"
-      esac
-    else
-      _abort_script "sorry, distribution {G}%s" "${ID}"
-    fi
-    if ! _check_host_is_fresh
-    then
-      if [[ ${_force} -eq 0 ]]
-      then
-        _abort_script "the host is already configured (add {G}--force{N})"
-      fi
-    fi
-    if [[ $(id -u) -ne 0 ]]
-    then
-      _abort_script "run me as root: {G}sudo $0 setup::host subnet:${_subnet} {N}or {Y}sudo !!"
-    fi
-    _printf "Installation of required packages ... {+}{G}please wait {N}..."
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update &>>~/.rskvm.log
-    apt-get dist-upgrade -y &>>~/.rskvm.log
-    _pkgs=()
-    _pkgs+=( "qemu-kvm" )
-    _pkgs+=( "virtinst" )
-    _pkgs+=( "libvirt-daemon" )
-    _pkgs+=( "libvirt-clients" )
-    _pkgs+=( "qemu-utils" )
-    _pkgs+=( "bridge-utils" )
-    _pkgs+=( "libvirt-daemon-driver-qemu" )
-    _pkgs+=( "libvirt-daemon-system" )
-    _pkgs+=( "qemu-system-x86" )
-    _pkgs+=( "cpu-checker" )
-    _pkgs+=( "gpg" )
-    _pkgs+=( "gpg-agent" )
-    _pkgs+=( "curl" )
-    _pkgs+=( "jq" )
-    _pkgs+=( "zstd" )
-    if [[ ${_subnet} != "local" ]]
-    then
-      _pkgs+=( "dnsmasq-base" )
-      _pkgs+=( "netfilter-persistent" )
-      _pkgs+=( "iptables-persistent" )
-    fi
-    apt-get install -y --no-install-recommends ${_pkgs[@]} &>>~/.rskvm.log
-    _printf "\rInstallation of required packages ... {G} DONE {N}...       \n"
-
-    if [[ ${_subnet} != "local" ]]
-    then
-      _printf "Configuration of iptables\n"
-      if [[ -f /etc/iptables/rules.v4 ]] && [[ ! -f /etc/iptables/rules.v4.save.rskvm ]]
-      then
-        cp "/etc/iptables/rules.v4" "/etc/iptables/rules.v4.save.rskvm"
-      fi
-      echo -n "$PAYLOAD_IPTABLES_RULES" | base64 -d | SUBNET="${_subnet}" HOST_SSH_PORT="${_ssh_port}" envsubst '$SUBNET $HOST_SSH_PORT' >/etc/iptables/rules.v4
-      systemctl restart netfilter-persistent
-      #_printf "Configuration of ip forwarding...\n"
-      #echo -n "$PAYLOAD_SYSCTL_FORWARD" | base64 -d >/etc/sysctl.d/ip_forward.conf
-      #sysctl -p /etc/sysctl.d/ip_forward.conf >/dev/null
-      echo -n "$PAYLOAD_VIRT_NET_DEFAULT" | base64 -d | NET_DNS_SERVER="10.53.53.53" NET_DOMAIN="vm" IP_GW="${_first_ip}" IP_NETMASK="${_netmask}" IP_START="${_start_ip}" IP_END="${_end_ip}" envsubst '$IP_START $IP_END $IP_NETMASK $IP_GW $NET_DOMAIN $NET_DNS_SERVER' >/tmp/default.xml
-      if virsh net-info default &>/dev/null
-      then
-        virsh net-destroy default &>/dev/null || true
-        virsh net-undefine default &>/dev/null || true
-      fi
-      virsh net-define /tmp/default.xml
-      virsh net-start default
-      virsh net-autostart default
-      rm /tmp/default.xml
-    fi
-    if [[ ${_remote} -eq 0 ]]
-    then
-      _printf "\n{G}READY\n\n"
-      _printf "run:\n\n"
-      _printf "  {Y}$ME -c me:<name>\n"
-      _printf "  {Y}$ME -m user:${_user}@? user:root@? ssh:root@~/.ssh/authorized_keys ssh:${_user}@~/.ssh/authorized_keys group:sudo@${_user}\n"
-      _printf "  {Y}exec newgrp libvirt\n"
-      _printf "  {Y}exec newgrp $_user\n"
-      _printf "\nextra:\n\n"
-      _printf "  {Y}echo 'alias cssh=\"ssh -o LogLevel=QUIET -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null\"' >>~/.bash_aliases\n"
-      _printf "\n"
-    fi
-  else
-    _abort_script "missing /etc/os-relase"
- fi
+  _printf "\n{G}READY\n\n"
+  _printf "run:\n\n"
+  _printf "  {Y}$ME -c me:<name>\n"
+  _printf "  {Y}$ME -m user:${_user}@? user:root@? ssh:root@~/.ssh/authorized_keys ssh:${_user}@~/.ssh/authorized_keys group:sudo@${_user}\n"
 }
 
 _ssh_to_vm() {
@@ -3366,239 +3155,6 @@ _is_cidr() {
   return 1
 }
 
-# zt installer sucks :)
-_install_zerotier_one() {
-  curl --connect-timeout "${CURL_TIMEOUT}" -s https://install.zerotier.com | sudo bash &>/dev/null
-  if [[ -n ${1} ]]
-  then
-    # make sure w starting with new identity?
-    systemctl start zerotier-one
-    _printf "Joining ZT network: {Y}%s\n" "${1}"
-    zerotier-cli join "${1}"
-  fi
-}
-
-_zt_get_address() {
-  if [[ -x /usr/sbin/zerotier-cli ]]
-  then
-    /usr/sbin/zerotier-cli info | awk '{print $3}'
-  else
-    _abort_script "ZeroTier One is not installed..."
-  fi
-}
-
-# a lot of assumptions - hey yeahhhh...
-_setup_remote_host() {
-local _host="${1}" _name _val _asroot=0 _subnet _overlay _zt_net _zt_net_address _zt_node _first_ip _start_ip _end_ip _netmask _prefix _ip _net _ssh_port _zt_ip=""
-  shift
-  while [[ -n ${1} ]]
-  do
-    case "${1,,}" in
-      overlay-network:*|overlay:*)
-        if _overlay=$(_extract_param "${1}")
-        then
-          if _val=$(_config_get "/overlay/${_overlay}/provider")
-          then
-            :
-          else
-            _printf "{Y}WARNING:{N} only ZT supported at this time - option ignored...\n"
-          fi
-        else
-          _abort_script "missing {G}overlay{N} network provider"
-        fi
-        shift
-        ;;
-      zt-network:*|zt-net:*|zt:*)
-        if ! _zt_net=$(_extract_param "${1}")
-        then
-          _abort_script "missing {G}zt-net{N} network name/address"
-        fi
-        if ! _zt_net_address=$(_config_get "/overlay/zt/${_zt_net}/network")
-        then
-          _abort_script "unknown ZT network selected"
-        fi
-        _config_put "/host/${_host}/overlay/zt/network" "${_zt_net}"
-        _config_put "/overlay/zt/current" "${_zt_net}"
-        shift
-        ;;
-      zt-ip:*)
-        if _val=$(_extract_param "${1}")
-        then
-          if _is_ip "${_val}"
-          then
-            _zt_ip="${_val}"
-          fi
-        fi
-        shift
-        ;;
-      subnet:*)
-        if ! _subnet=$(_extract_param "${1}")
-        then
-          _abort_script "missing {G}subnet{N} prefix"
-        fi
-        if ! _is_cidr "${_subnet}"
-        then
-          _abort_script "this is not network prefix: {G}%s\n" "${_subnet}"
-        fi
-        shift
-        ;;
-        *)
-          _printf "{Y}WARNING:{N} skipping unknown option {G}%s\n" "${1}"
-          shift
-    esac
-  done
-  if [[ -z ${_subnet} ]]
-  then
-    _abort_script "{G}subnet{N} prefix not provided"
-  fi
-  if [[ -z ${_zt_net_address} ]]
-  then
-      if _zt_net=$(_config_get "/overlay/zt/current")
-      then
-        _printf "{Y}WARNING: {N} autoselect ZT netowork: {G}%s{N}\n" "${_zt_net}"
-        if ! _zt_net_address=$(_config_get "/overlay/zt/${_zt_net}/network")
-        then
-          _abort_script "unknown ZT network selected"
-        fi
-      else
-          _abort_script "no ZT network definied"
-      fi
-  fi
-  _ip=$(_ip_from_cidr $_subnet)
-  _prefix=$(_cidr_from_cidr ${_subnet})
-  _netmask=$(_cidr2long ${_prefix})
-  _net=$(_ip2long ${_ip})
-  # check if we are on subnet boundary
-  if [[ $(( ${_net} & ${_netmask} )) -ne ${_net} ]]
-  then
-    _abort_script "incorrect subnet prefix!"
-  fi
-  if [[ ${_prefix} -gt 24 ]]
-  then
-    _abort_script "subnet to small!"
-  fi
-  # Last IP in the pool
-  _end_ip=$(( (~${_netmask} & 0xffffffff) - 1 ))
-  _end_ip=$(_long2ip $(( ${_net} | ${_end_ip})))
-  _first_ip=$(_long2ip $(( ${_net} + 1)))
-  _start_ip=$(_long2ip $(( ${_net} + 2)))
-  _netmask=$(_long2ip ${_netmask})
-
-  if ! _val=$(_config_get "/host/${_host}/address")
-  then
-    _abort_script "host {G}%s{N} not definied" "${_host}"
-  fi
-  _printf "Checking conectivity to host {G}%s\n" "${_host}"
-  if ! _val=$(_setup_remote_host_test "${_host}" true)
-  then
-    _abort_script "connection to {G}${_host}{N} failed"
-  fi
-  _printf "Checking root access\n"
-  if ! _val=$(echo 'echo -n $(id -u)' | _setup_remote_host_test "${_host}" bash -s )
-  then
-    _abort_script "connection to {G}${_host}{N} failed"
-  fi
-  if ! [[ ${_val} =~ ^[0-9]+$ ]]
-  then
-    _abort_script "sorry unexpected error: X%sX" "${_val}"
-  fi
-  if [[ ${_val} -eq 0 ]]
-  then
-    _asroot=1
-    _printf "Connected as {Y}root{N} - user {G}rskvm{N} will be {*}created{N} at later stage\n"
-    _config_put "/host/${_host}/as-root" "direct"
-  else
-    # some sudo support?
-    _abort_script "unable to continue - not {G}root{N} user configured"
-  fi
-  _printf "Transfering {Y}%s{N} to host {G}%s\n" "$0" "${_host}"
-  if ! cat $0 | _ssh --pass -enone "${_host}" "dd if=/dev/stdin of=/usr/bin/$ME status=none && chmod +x /usr/bin/$ME && rskvm transfer:was-ok"
-  then
-    _abort_script "unable to transfer {Y}${ME}{N} to remote host..."
-  fi
-  _printf "Starting configuration process...\n"
-  # change this for parameter
-  _ssh_port="22"
-  if _val=$(_config_get "/host/${_host}/port")
-  then
-    _ssh_port="${_val}"
-  fi
-  if ! _ssh --pass "${_host}" FOR_USER=rskvm rskvm setup::host --remote --force subnet:${_subnet} ssh-port:${_ssh_port}
-  then
-    _abort_script "configuration failed..."
-  fi
-  if [[ -n ${_zt_net_address} ]]
-  then
-    _printf "Installing Zerotier-One\n"
-    if ! _ssh "${_host}" install-zt:${_zt_net_address}
-    then
-      _abort_script "zt installation failed"
-    fi
-    if ! _zt_node=$(_ssh "${_host}" zt-address:get)
-    then
-      _abort_script "unable to retrevie ZT node address..."
-    fi
-    # for ZT API call (later)
-    _printf "ZT node address: {G}%s\n" "${_zt_node}"
-    _config_put "/host/${_host}/overlay/zt/node" "${_zt_node}"
-    _printf "Auto register in ZeroTier One network: "
-    _done=0
-    _cnt=1
-    while [[ $_done -eq 0 ]]
-    do
-      if [[ $_cnt -gt 60 ]]
-      then
-        break
-      fi
-      if _val=$(_zt_authorize_node "${_zt_node}" "${_zt_ip}")
-      then
-        if [[ -n ${_val} ]]
-        then
-          break
-        fi
-      fi
-      echo -n "."
-      sleep 1
-      ((_cnt++)) || true
-    done
-    if [[ -n ${_val} ]]
-    then
-      _printf " {G}OK{N}\n"
-      _printf "NodeIP: {G}%s\n" "${_val}"
-      if _is_ip "${_val}"
-      then
-        _config_put "/host/${_host}/overlay/zt/address" "${_val}"
-        _printf "Setup route to {G}%s {N}via {Y}%s\n" "${_subnet}" "${_val}"
-        _zt_set_route "${_subnet}" "${_val}"
-      else
-        _printf "{+}{Y}WARNING{N}: ZT - wrong IP format: {G}%s\n" "${_val}"
-      fi
-      if _zt_rename_node "${_zt_node}" "${_host}"
-      then
-        _printf "Change ZT node name to {G}%s\n" "${_host}"
-      fi
-      _config_put "/host/${_host}/subnet" "${_subnet}"
-    else
-      _printf " {R}FAIL{N}\n"
-    fi
-    #_printf "At the moment:\n"
-    #_printf " Confirm node join in ZT web UI and add route to: ${_subnet}\n"
-  fi
-  if [[ ${_asroot} -eq 1 ]]
-  then
-    if _ssh -A "${_host}" host-config-user:rskvm
-    then
-      _config_put "/host/${_host}/user" "rskvm"
-      if ! _ssh "${_host}" -c me:${_host}
-      then
-        _abort_script "unable to setup own name"
-      fi
-    else
-      _abort_script "unable to setup user {G}%s" "rskvm"
-    fi
-  fi
-}
-
 # only ssh-agent support
 _host_config_user() {
 local _user="${1}"
@@ -3622,204 +3178,6 @@ local _user="${1}"
   gpasswd -a ${_user} libvirt
   # make sure home folder is accesible for libvirt (for Ubuntu 22.04 is not by default)
   chmod o+x .
-}
-
-_zt_api_get() {
-local _ztnet _api _network _resp _val _url="$1" _extract="$2" _mode="${3}"
-  if ! command -v jq &>/dev/null
-  then
-    return 1
-  fi
-  if ! _ztnet=$(_config_get "/overlay/zt/current")
-  then
-    _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
-  fi
-  if ! _api=$(_config_get "/overlay/zt/${_ztnet}/api")
-  then
-    return 1
-  fi
-  if ! _network=$(_config_get "/overlay/zt/${_ztnet}/network")
-  then
-    return 1
-  fi
-  if ! _resp=$(curl --connect-timeout "${CURL_TIMEOUT}" -sf -X GET -H "Content-Type: application/json" -H "Authorization: bearer ${_api}"  "${ZT_API}/network/${_network}${_url}")
-  then
-    return 1
-  fi
-  if ! _val=$(jq ${_mode} "${_extract}" <<< "${_resp}")
-  then
-    return 1
-  fi
-  echo -n "${_val}"
-}
-
-_zt_api_set() {
-local _api _network _ztnet _resp _val
-  if ! command -v jq &>/dev/null
-  then
-    return 1
-  fi
-  if ! _ztnet=$(_config_get "/overlay/zt/current")
-  then
-    _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
-  fi
-  if ! _api=$(_config_get "/overlay/zt/${_ztnet}/api")
-  then
-    return 1
-  fi
-  if ! _network=$(_config_get "/overlay/zt/${_ztnet}/network")
-  then
-    return 1
-  fi
-  if [[ $# -eq 2 ]]
-  then
-    if curl --connect-timeout "${CURL_TIMEOUT}" -o /dev/null -sf -X POST -H "Content-Type: application/json" -H "Authorization: bearer ${_api}" --data "${2}" "${ZT_API}/network/${_network}${1}"
-    then
-      return 0
-    fi
-    return 1
-  else
-    if ! _resp=$(curl --connect-timeout "${CURL_TIMEOUT}" -sf -X POST -H "Content-Type: application/json" -H "Authorization: bearer ${_api}" --data "${3}" "${ZT_API}/network/${_network}${1}")
-    then
-      return 1
-    fi
-    if ! _val=$(jq $4 "${2}" <<< "${_resp}")
-    then
-      return 1
-    fi
-    echo -n "${_val}"
-  fi
-}
-
-_zt_api_delete() {
-local _api _network _ztnet _resp _val
-  if ! command -v jq &>/dev/null
-  then
-    return 1
-  fi
-  if ! _ztnet=$(_config_get "/overlay/zt/current")
-  then
-    _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
-  fi
-  if ! _api=$(_config_get "/overlay/zt/${_ztnet}/api")
-  then
-    return 1
-  fi
-  if ! _network=$(_config_get "/overlay/zt/${_ztnet}/network")
-  then
-    return 1
-  fi
-  if [[ -n ${1} ]]
-  then
-    if curl --connect-timeout "${CURL_TIMEOUT}" -sf -o /dev/null -X DELETE -H "Content-Type: application/json" -H "Authorization: bearer ${_api}" "${ZT_API}/network/${_network}${1}"
-    then
-      return 0
-    fi
-  fi
-  return 1
-}
-
-
-# $1 subnet $2 via
-_zt_set_route() {
-local _routes
-  if _routes=$(_zt_api_get "" ".config.routes" -c)
-  then
-    #_printf "Current routes: %s\n" "${_routes}"
-    _routes=$(jq -c '. |= . + [{"target":"'${1}'","via":"'${2}'"}]' <<< "${_routes}")
-    #_printf "New: %s\n" "${_routes}"
-    _zt_api_set "" '{"config": { "routes": '${_routes}'} }'
-  fi
-}
-
-# $1 subnet $2 via
-_zt_del_route() {
-local _routes _diff
-  if _routes=$(_zt_api_get "" ".config.routes" -c)
-  then
-    #_printf "Current routes: %s\n" "${_routes}"
-    _diff=$(jq -c 'del(.[] | select(.target == "'${1}'"))' <<< "${_routes}")
-    if [[ "${_diff}" != "${_routes}" ]]
-    then
-      _verbose_printf "ZT/Route update:\n{G}%s{Y}%s\n" "${_routes}" "${_diff}"
-      _zt_api_set "" '{"config": { "routes": '${_diff}'} }'
-    fi
-  fi
-}
-
-_zt_authorize_node() {
-local _result _ip="${2}"
-  if [[ -n ${_ip} ]]
-  then
-    if _result=$(_zt_api_set "/member/${1}" ".config.ipAssignments[]" "{\"config\":{\"authorized\": true,\"ipAssignments\": [ \"${_ip}\"]}}" -r)
-    then
-      echo -n "${_result}"
-      return 0
-    fi
-  else
-    if _result=$(_zt_api_set "/member/${1}" ".config.ipAssignments[]" '{"config":{"authorized": true}}' -r)
-    then
-      echo -n "${_result}"
-      return 0
-    fi
-  fi
-  return 1
-}
-
-_zt_unauthorize_node() {
-local _result
-  if _result=$(_zt_api_set "/member/${1}" "." '{ "config": {"authorized": false,"ipAssignments": []}}' -c)
-  then
-    if _result=$(_zt_api_delete "/member/${1}")
-    then
-      return 0
-    fi
-  fi
-  return 1
-}
-
-_zt_rename_node() {
-  if _zt_api_set "/member/${1}" "{\"name\":\"${2}\", \"description\": \"Managed by RSKVM\"}"
-  then
-    return 0
-  fi
-  return 1
-}
-
-_zt_verify_api() {
-local _api _network _resp _val _ztnet
-  if ! command -v jq &>/dev/null
-  then
-    _abort_script "missing required command {G}jq{N}"
-  fi
-  if _ztnet=$(_config_get "/overlay/zt/current")
-  then
-    if ! _api=$(_config_get "/overlay/zt/${_ztnet}/api")
-    then
-      _abort_script "missing ZT {G}API{N} key for network ${_ztnet}"
-    fi
-    if ! _network=$(_config_get "/overlay/zt/${_ztnet}/network")
-    then
-      _abort_script "missing ZT {G}network{N} ID for network ${_ztnet}"
-    fi
-    if ! _resp=$(curl --connect-timeout "${CURL_TIMEOUT}" -sf -X GET -H "Content-Type: application/json" -H "Authorization: bearer ${_api}"  "${ZT_API}/network/${_network}")
-    then
-      _abort_script "connection to ZT's API service failed"
-    fi
-    if _val=$(jq -r .id <<< ${_resp} 2>/dev/null)
-    then
-      if [[ ${_val} == ${_network} ]]
-      then
-        _printf "ZT API (${_ztnet}/${_network}): {G}OK\n"
-      else
-        _abort_script "ZT missmatch networks"
-      fi
-    else
-      _abort_script "unable to verify API access"
-    fi
-  else
-    _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
-  fi
 }
 
 _is_root_required() {
@@ -3877,33 +3235,16 @@ _install() {
     cp $0 /usr/bin/rskvm
     chmod +x /usr/bin/rskvm
   fi
-  echo -n "${PAYLOAD_RSKVM_SSH_NO_VERIFY}" | base64 -d | dd of=/usr/bin/rskvm-ssh-no-verify status=none
-  chmod +x /usr/bin/rskvm-ssh-no-verify
   _printf "{G}INSTALL OK: {Y}$(rskvm me:version)\n"
   exit 0
 }
 
 _check_runtime() {
-  if ! command -v curl &>/dev/null
-  then
-    _abort_script "{G}curl{R} is required..."
-  fi
-  if ! command -v ssh &>/dev/null
-  then
-    _abort_script "{G}ssh{R} is required..."
-  fi
-  if ! command -v ssh &>/dev/null
-  then
-    _abort_script "{G}ssh{R} is required..."
-  fi
-  if ! command -v jq &>/dev/null
-  then
-    _abort_script "{G}jq{R} is required..."
-  fi
-  if ! command -v zstdmt &>/dev/null
-  then
-    _abort_script "{G}zstdmt{R} is required..."
-  fi
+  command -v virt-install &>/dev/null || _abort_script "{G}virt-install{R} is required..."
+  command -v curl &>/dev/null || _abort_script "{G}curl{R} is required..."
+  command -v ssh &>/dev/null || _abort_script "{G}ssh{R} is required..."
+  command -v jq &>/dev/null || _abort_script "{G}jq{R} is required..."
+  command -v zstdmt &>/dev/null || _abort_script "{G}zstdmt{R} is required..."
 }
 
 _show_backing_templates() {
@@ -3964,16 +3305,8 @@ local _val
       _printf " >>>> {+} {G}the transfer is successful{N} <<<<\n"
       exit 0
       ;;
-    install-zt:*)
-      _install_zerotier_one ${1#*:}
-      exit
-      ;;
     host-config-user:*)
       _host_config_user ${1#*:}
-      exit
-      ;;
-    zt-address:get)
-      _zt_get_address
       exit
       ;;
     setup::host|setup:host|--setup-host)
@@ -3983,17 +3316,6 @@ local _val
       ;;
     host:list|host::list|list:host|list::host)
       _config_host_list
-      exit
-      ;;
-    # setup remote host
-    setup:host:*|setup::host:*|--setup-host:*)
-      if _val=$(_extract_param "${1}")
-      then
-        shift
-        _setup_remote_host "${_val}" "$@"
-      else
-        _abort_script "missing {G}[user@]host{N} for setup::host"
-      fi
       exit
       ;;
     config::host|config:host|--config-host|-c)
@@ -4009,55 +3331,6 @@ local _val
     config::rskvm|config:rskvm|--config-rskvm|--rskvm|-g)
       shift
       _config_rskvm "$@"
-      exit
-      ;;
-    overlay:zt:name:*)
-      if _val=$(_extract_param "${1}")
-      then
-        shift
-        if [[ ${_val} =~ ^[a-zA-Z][a-zA-Z0-9_-]+$ ]]
-        then
-          _config_put "/overlay/zt/${_val}/" ""
-          _config_put "/overlay/zt/current" "${_val}"
-        else
-          _abort_script "wrong name for overlay network"
-        fi
-      fi
-      exit
-      ;;
-    overlay:zt:api:*)
-      if _ztnet=$(_config_get "/overlay/zt/current")
-      then
-        if _val=$(_extract_param "${1}")
-        then
-          shift
-          _config_put "/overlay/zt/${_ztnet}/api" "${_val}"
-        else
-          _abort_script "missing {G}API{N} key for ZeroTier One overlay network"
-        fi
-      else
-        _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
-      fi
-      exit
-      ;;
-    overlay:zt:network:*)
-      if _ztnet=$(_config_get "/overlay/zt/current")
-      then
-        if _val=$(_extract_param "${1}")
-        then
-          shift
-          _config_put "/overlay/zt/${_ztnet}/network" "${_val}"
-        else
-          _abort_script "missing {G}network{N} ID for ZeroTier One overlay network"
-        fi
-      else
-        _abort_script "ZT overlay network not selected (use overlay:zt:name:<NAME> first)"
-      fi
-      exit
-      ;;
-    overlay:zt:verify)
-      shift
-      _zt_verify_api
       exit
       ;;
     ssh:*)
@@ -4103,33 +3376,26 @@ _IMAGE_REFRESHED=0
 
 _check_runtime
 
-if [[ "$1" == "me:install" ]]
-then
+if [[ "$1" == "me:install" ]]; then
   _install
 fi
 
-if [[ "$1" == "me:update" ]]
-then
+if [[ "$1" == "me:update" ]]; then
   _self_update
 fi
 
-if [[ -z ${_RSKVM_VERSION} ]]
-then
+if [[ -z ${_RSKVM_VERSION} ]]; then
   _abort_script "missing {G}\$_RSKVM_VERSION"
 fi
 
-if [[ "$1" == "me:version" ]]
-then
+if [[ "$1" == "me:version" ]]; then
   _print_line "${_RSKVM_VERSION}"
   exit 0
 fi
 
-if [[ -x /usr/bin/rskvm ]]
-then
-  if _ver=$(/usr/bin/rskvm me:version)
-  then
-    if [[ ${_ver} -lt ${_RSKVM_VERSION} ]]
-    then
+if [[ -x /usr/bin/rskvm ]]; then
+  if _ver="$(/usr/bin/rskvm me:version)"; then
+    if [[ ${_ver} -lt ${_RSKVM_VERSION} ]]; then
       _abort_script "older version (${_ver}) of rskvm detected! Please run: {G}$0 me:install"
     fi
   else
