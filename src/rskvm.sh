@@ -1155,48 +1155,40 @@ local _val
 
 _config_template_location() {
 local _templates
-  if _templates=$(_config_get "config/templates")
-  then
-    echo "${_templates}"
+  if _templates=$(_config_get "config/templates"); then
+    echo -n "${_templates}"
   else
-    echo "$HOME/vm/template"
+    echo -n "${HOME}/vm/template"
   fi
 }
 
 _config_storage_location() {
-local _vm_storage
-  if _vm_storage=$(_config_get "config/storage")
-  then
-    echo "${_vm_storage}"
+local _vm_storage mode
+  if _vm_storage=$(_config_get "config/storage"); then
+    echo -n "${_vm_storage}"
   else
-    echo "$HOME/vm/rskvm"
+    mode="$(stat -c "%a" ~)"
+    [[ $(( mode & 1 )) -eq 1 ]] || chmod o+x "${HOME}" || true
+    echo -n "${HOME}/vm/rskvm"
   fi
 }
 
 _config_default_bridge() {
-local _bridge
-  if _bridge=$(_config_get "config/bridge")
-  then
+local _bridge br
+  if _bridge=$(_config_get "config/bridge"); then
     export BRIDGE="${_bridge}"
   else
-    if ip -o link show dev host0 &>/dev/null
-    then
-      _verbose_printf "Autoselecting default bridge: {G}host0\n"
-      _config_put "config/bridge" "host0"
+    if ip -o link show dev host0 &>/dev/null; then
       export BRIDGE="host0"
-    elif ip -o link show dev lan0 &>/dev/null
-    then
-      _verbose_printf "Autoselecting default bridge: {G}lan0\n"
-      _config_put "config/bridge" "lan0"
+    elif ip -o link show dev lan0 &>/dev/null; then
       export BRIDGE="lan0"
-    elif ip -o link show dev vm0 &>/dev/null
-    then
-      _verbose_printf "Autoselecting default bridge: {G}vm0\n"
-      _config_put "config/bridge" "vm0"
+    elif ip -o link show dev vm0 &>/dev/null; then
       export BRIDGE="vm0"
     else
       _abort_script "Unable to locate default bridge device"
     fi
+    _verbose_printf "Autoselecting default bridge: {G}${BRIDGE}\n"
+    _config_put "config/bridge" "${BRIDGE}"
   fi
 }
 
