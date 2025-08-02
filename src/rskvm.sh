@@ -1545,7 +1545,6 @@ _save_ssh_host() {
       [[ -e ${HOME}/.ssh/${vmd} ]] || mkdir -p "${HOME}/.ssh/${vmd}"
       {
         printf -- "#@${RSKVM_HOST}\n"
-        printf -- "#%s %s\n" "$(hostname -f)" "${IS_REMOTE-0}"
         printf -- "Host %s.vm %s\n" "${ssh_host}" "${ssh_host}"
         printf -- "  Hostname %s.vm\n" "${ssh_host}"
         printf -- "  User root\n"
