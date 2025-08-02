@@ -199,7 +199,7 @@ local _path="$1"
   then
     if [[ "${2}" != "check" ]]
     then
-      cat 2>/dev/null "${CONFIG}${_path}" || return 1
+     head -n 1 2>/dev/null "${CONFIG}${_path}" || return 1
     fi
     return 0
   fi
@@ -1537,29 +1537,35 @@ local _param="${1}"
 
 _save_ssh_host() {
   local vmd
+  local ssh_host="${1-}"
+  local vmhost="${RSKVM_HOST}"
   [[ ${IS_REMOTE-0} -eq 0 ]] || return 0
+  [[ ${vmhost} != "localhost" ]] || vmhost="$(_who_am_i)" || true
   if vmd=$(_config_get "config/ssh-config-directory"); then
     if [[ -n ${vmd} ]]; then
-      local ssh_host="${1:-}"
       [[ -n ${ssh_host} ]] || return 0
       [[ -e ${HOME}/.ssh/${vmd} ]] || mkdir -p "${HOME}/.ssh/${vmd}"
       {
-        printf -- "#@${RSKVM_HOST}\n"
         printf -- "Host %s.vm %s\n" "${ssh_host}" "${ssh_host}"
         printf -- "  Hostname %s.vm\n" "${ssh_host}"
         printf -- "  User root\n"
-      } >"${HOME}/.ssh/${vmd}/${ssh_host}"
+      } >"${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
     fi
   fi
 }
 
 _remove_ssh_host() {
   local vmd
+  local vmhost="${RSKVM_HOST}"
   [[ ${IS_REMOTE-0} -eq 0 ]] || return 0
-  if  vmd=$(_config_get "config/ssh-config-directory"); then
+  [[ ${vmhost} != "localhost" ]] || vmhost="$(_who_am_i)" || true
+  if vmd=$(_config_get "config/ssh-config-directory"); then
     if [[ -n ${vmd} ]]; then
       local ssh_host="${1:-}"
       [[ -n ${ssh_host} ]] || return 0
+      if [[ -f ${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost} ]]; then
+        rm -- "${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
+      fi
       if [[ -f ${HOME}/.ssh/${vmd}/${ssh_host} ]]; then
         rm -- "${HOME}/.ssh/${vmd}/${ssh_host}"
       fi
@@ -2035,6 +2041,8 @@ _vm_parse_spec() {
 local _cmd _tmp
 local _do _host _ram _cpu _template _name
 local _rest=()
+local me="$(_who_am_i)"
+
   _do="$1"
   shift
   if [[ -n "${1}" ]]
@@ -2082,8 +2090,7 @@ local _rest=()
         _do="create"
       fi
     fi
-    if [[ ${_cmd} =~ @ ]]
-    then
+    if [[ ${_cmd} =~ @ ]]; then
       _name="${_cmd%%@*}"
       _host="${_cmd##*@}"
       _host="${_host%%:*}"
@@ -2092,15 +2099,16 @@ local _rest=()
       _host="localhost"
       _name="${_cmd%%:*}"
     fi
-    if [[ ${_cmd} =~ : ]]
-    then
+    if [[ ${_host} == ${me} ]]; then
+      _host="localhost"
+    fi
+    if [[ ${_cmd} =~ : ]]; then
       _tmp="${_cmd%%:*}"
       _cmd="${_cmd#${_tmp}}"
     else
       _cmd=""
     fi
-    if [[ ${_name} =~ / ]]
-    then
+    if [[ ${_name} =~ / ]]; then
       _template="${_name##*/}"
       _name="${_name%%/*}"
     fi
@@ -2225,6 +2233,13 @@ local _rest=()
     _abort_script "RAM size greater than {G}64GB{N} - use {Y}--force{N} to confirm!"
   fi
 
+  if [[ ${_name} == ${me} ]]; then
+    _abort_script "same name as host selected!"
+  fi
+  if [[ -d ${CONFIG}/host/${_name} ]]; then
+    _abort_script "same name as existing host selected!"
+  fi
+
   export RSKVM_DO="${_do}"
   export RSKVM_NAME="${_name}"
   export RSKVM_TEMPLATE="${_template}"
@@ -2234,14 +2249,13 @@ local _rest=()
 }
 
 _who_am_i() {
-local _me
-  if _me=$(_config_get "/config/me")
-  then
-    echo -n "${_me}"
-  else
-    echo -n "$(hostname)"
+local me
+  if ! me="$(_config_get "/config/me")"; then
+    me="$(hostname)"
   fi
+  printf -- "%s" "${me}"
 }
+
 _vm_wait_for_me() {
 local _name="${1}" _host="${2}" _template="${3}" _wait_params _ip _done=0 _cnt=0 _wait_count _wait_sleep _wait_progress
   _wait_params=$(_config_get "/image/master/${_template}/wait_params") || true
@@ -2414,27 +2428,21 @@ local _name="${1}" _desc
 
 _vm_delete() {
 local _name="${1}" _desc
-  if [[ -n "${_name}" ]]
-  then
-    if ! _desc=$(LANG=C virsh desc "${_name}" 2>/dev/null)
-    then
+  if [[ -n "${_name}" ]]; then
+    if ! _desc=$(LANG=C virsh desc "${_name}" 2>/dev/null); then
       _abort_script "virtual machine {G}%s{N} not found" "${_name}"
     fi
-    if [[ ! ${_desc} =~ rskvm ]]
-    then
+    if [[ ! ${_desc} =~ rskvm ]]; then
       _abort_script "virtual machine not supported by $ME"
     fi
-    if _is_vm_protected "${_name}"
-    then
+    if _is_vm_protected "${_name}"; then
       _abort_script "virtual machine {G}%s{N} is protected" "${_name}"
     fi
     _verbose_printf "Shutting down VM {G}%s\n" "${_name}"
-    if virsh shutdown "${_name}" --mode agent &>>~/.rskvm.log
-    then
+    if virsh shutdown "${_name}" --mode agent &>>~/.rskvm.log; then
       sleep 1
     fi
-    if virsh shutdown "${_name}" &>>~/.rskvm.log
-    then
+    if virsh shutdown "${_name}" &>>~/.rskvm.log; then
       sleep 1
     fi
     _verbose_printf "Removing VM {G}%s\n" "${_name}"
@@ -2443,8 +2451,7 @@ local _name="${1}" _desc
     # error: unsupported flags (0x2) in function virStorageBackendVolDeleteLocal
     # removed: --delete-storage-volume-snapshots
     virsh undefine --domain "${_name}" --remove-all-storage --managed-save --snapshots-metadata --checkpoints-metadata --nvram &>>~/.rskvm.log || true
-    if [[ -f ${VM_STORAGE}/${_name}.vm ]]
-    then
+    if [[ -f ${VM_STORAGE}/${_name}.vm ]]; then
       _printf "orphan image: {R}%s.vm\n" "${_name}"
       rm -f "${VM_STORAGE}/${_name}.vm"
     fi
@@ -2599,8 +2606,7 @@ local _args=() _val
 _vm_manager_process() {
 local _rest=() _val _remote _action _hash _remote_hash
 
-  if [[ -z $1 ]]
-  then
+  if [[ -z $1 ]]; then
     exit
   fi
 
@@ -2880,6 +2886,7 @@ local _rest=() _val _remote _action _hash _remote_hash
     then
       _abort_script "remote ssh invocation failed!"
     fi
+    set +x
     case "${RSKVM_DO}" in
       create|create-wait)
         _save_ssh_host "${RSKVM_NAME}"
