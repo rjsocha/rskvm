@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
 # ██████╗ ███████╗██╗  ██╗██╗   ██╗███╗   ███╗
 # ██╔══██╗██╔════╝██║ ██╔╝██║   ██║████╗ ████║
@@ -15,9 +15,14 @@
 #  rskvm config::rskvm ssh-host:<path>
 #  rskvm me:install me:version
 #
+#  Basic setup:
+#
+#  rskvm -c me:<name>
+#  rskvm -g ssh-config-directory:<path>
+#
 #  Host setup:
 #
-#    rskvm config:host host:<NAME> address:<FQDN> user:<USER> port:<SSH-PORT>
+#    rskvm config:host host:<NAME> address:<FQDN> user:<USER> [port:<22>]
 #
 #  Templates:
 #
@@ -25,8 +30,6 @@
 #    rskvm --image-list | --image-update | --image-unused [--purge] |  rskvm --image-used
 #
 # EOU
-# Above EOU tag is required  as a mark of End Of Usage
-
 set -eE
 
 export ME=rskvm
@@ -915,11 +918,11 @@ _config_vm() {
 }
 
 _config_rskvm() {
-  while [[ -n $1 ]]
-  do
+  while [[ -n $1 ]]; do
     case ${1,,} in
-      ssh-host:*)
-        _config_put "config/rskvm-ssh-host" "${1#*:}"
+      # For bash completion script
+      ssh-config-directory:*)
+        _config_put "config/ssh-config-directory" "${1#*:}"
         shift
         ;;
       *)
@@ -1533,34 +1536,33 @@ local _param="${1}"
 }
 
 _save_ssh_host() {
-  local _ssh_d
-  if  _ssh_d=$(_config_get "config/rskvm-ssh-host")
-  then
-    if [[ -n ${_ssh_d} ]]
-    then
-      local _ssh_host="${1:-}"
-      [[ -n ${_ssh_host} ]] || return 0
-      mkdir -p "${HOME}/.ssh/${_ssh_d}"
+  local vmd
+  [[ ${IS_REMOTE-0} -eq 0 ]] || return 0
+  if vmd=$(_config_get "config/ssh-config-directory"); then
+    if [[ -n ${vmd} ]]; then
+      local ssh_host="${1:-}"
+      [[ -n ${ssh_host} ]] || return 0
+      [[ -e ${HOME}/.ssh/${vmd} ]] || mkdir -p "${HOME}/.ssh/${vmd}"
       {
         printf -- "#@${RSKVM_HOST}\n"
-        printf -- "Host %s\n" "${_ssh_host}"
+        printf -- "#%s %s\n" "$(hostname -f)" "${IS_REMOTE-0}"
+        printf -- "Host %s.vm %s\n" "${ssh_host}" "${ssh_host}"
+        printf -- "  Hostname %s.vm\n" "${ssh_host}"
         printf -- "  User root\n"
-      } >"${HOME}/.ssh/${_ssh_d}/${_ssh_host}"
+      } >"${HOME}/.ssh/${vmd}/${ssh_host}"
     fi
   fi
 }
 
 _remove_ssh_host() {
-  local _ssh_d
-  if  _ssh_d=$(_config_get "config/rskvm-ssh-host")
-  then
-    if [[ -n ${_ssh_d} ]]
-    then
-      local _ssh_host="${1:-}"
-      [[ -n ${_ssh_host} ]] || return 0
-      if [[ -f ${HOME}/.ssh/${_ssh_d}/${_ssh_host} ]]
-      then
-        rm -- "${HOME}/.ssh/${_ssh_d}/${_ssh_host}"
+  local vmd
+  [[ ${IS_REMOTE-0} -eq 0 ]] || return 0
+  if  vmd=$(_config_get "config/ssh-config-directory"); then
+    if [[ -n ${vmd} ]]; then
+      local ssh_host="${1:-}"
+      [[ -n ${ssh_host} ]] || return 0
+      if [[ -f ${HOME}/.ssh/${vmd}/${ssh_host} ]]; then
+        rm -- "${HOME}/.ssh/${vmd}/${ssh_host}"
       fi
     fi
   fi

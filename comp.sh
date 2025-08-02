@@ -14,7 +14,6 @@ __rskvm_bash() {
 
   if [[ ${cur} =~ ^\+([a-z][a-z0-9-]+/[a-z0-9-]+)@ ]] || [[ ${cur} =~ ^\+([a-z][a-z0-9-]+)@ ]]
   then
-    echo "XXXX" >>~/.comp.log
     local host hosts=()
     for host in $(find ~/.config/rskvm/host/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n")
     do
@@ -35,10 +34,10 @@ __rskvm_bash() {
     COMPREPLY=($(compgen -W "--image-list --image-update --image-unused --image-used --start --stop --console --full --verbose --no-config --update --remote-update --nested --link --prefer-uefi --bios --uefi --query --protect --unprotect --hide --unhide --exists --rebase --no-boot --boot" -- "${cur}"))
   elif [[ ${cur::1} == "-" ]]
   then
-    if [[ -d ~/.ssh/rskvm.d ]]
+    if [[ -d ~/.ssh/vm.d ]]
     then
       local _host _hosts
-      for _host in $(find ~/.ssh/rskvm.d -maxdepth 1 -mindepth 1 -type f -printf "%f\n")
+      for _host in $(find ~/.ssh/vm.d -maxdepth 1 -mindepth 1 -type f -printf "%f\n")
       do
         if [[ ${cword} -gt 1 ]]
         then
@@ -66,7 +65,7 @@ __rskvm_bash() {
       then
         local _host=${_words[@]}
         _host="${_host:1}"
-        _host=$(head -n1 ~/.ssh/rskvm.d/${_host})
+        _host=$(head -n1 ~/.ssh/vm.d/${_host})
         echo $_host >>~/.comp.log
         if [[ ${_host} =~ ^\#@ ]]
         then
