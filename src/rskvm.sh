@@ -18,7 +18,7 @@
 #  Basic setup:
 #
 #  rskvm -c me:<name>
-#  rskvm -g ssh-config-directory:<path>
+#  rskvm -g ssh-vm-directory:<path>
 #
 #  Host setup:
 #
@@ -921,8 +921,8 @@ _config_rskvm() {
   while [[ -n $1 ]]; do
     case ${1,,} in
       # For bash completion script
-      ssh-config-directory:*)
-        _config_put "config/ssh-config-directory" "${1#*:}"
+      ssh-vm-directory:*)
+        _config_put "config/ssh-vm-directory" "${1#*:}"
         shift
         ;;
       *)
@@ -1541,14 +1541,16 @@ _save_ssh_host() {
   local vmhost="${RSKVM_HOST}"
   [[ ${IS_REMOTE-0} -eq 0 ]] || return 0
   [[ ${vmhost} != "localhost" ]] || vmhost="$(_who_am_i)" || true
-  if vmd=$(_config_get "config/ssh-config-directory"); then
+  if vmd=$(_config_get "config/ssh-vm-directory"); then
     if [[ -n ${vmd} ]]; then
       [[ -n ${ssh_host} ]] || return 0
       [[ -e ${HOME}/.ssh/${vmd} ]] || mkdir -p "${HOME}/.ssh/${vmd}"
       {
-        printf -- "Host %s.vm %s\n" "${ssh_host}" "${ssh_host}"
+        printf -- "Host %s.vm\n" "${ssh_host}"
         printf -- "  Hostname %s.vm\n" "${ssh_host}"
         printf -- "  User root\n"
+        printf -- "Host %s\n" "${ssh_host}"
+        printf -- "  Hostname %s.vm\n" "${ssh_host}"
       } >"${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
     fi
   fi
@@ -1559,7 +1561,7 @@ _remove_ssh_host() {
   local vmhost="${RSKVM_HOST}"
   [[ ${IS_REMOTE-0} -eq 0 ]] || return 0
   [[ ${vmhost} != "localhost" ]] || vmhost="$(_who_am_i)" || true
-  if vmd=$(_config_get "config/ssh-config-directory"); then
+  if vmd=$(_config_get "config/ssh-vm-directory"); then
     if [[ -n ${vmd} ]]; then
       local ssh_host="${1:-}"
       [[ -n ${ssh_host} ]] || return 0

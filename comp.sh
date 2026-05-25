@@ -44,7 +44,7 @@ __rskvm_bash() {
           if [[ ${_n} =~ -${_host}(@|$) ]]
           then
             echo "ignore: $_host" >>~/.comp.log
-            #_c=1
+            _c=1
             break
           fi
         done
