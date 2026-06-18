@@ -1308,7 +1308,7 @@ local _config _name=$1
   then
     _abort_script "empty vm name given"
   fi
-  _config="${_config}!h:${_name}.vm!m:dns:60"
+  _config="${_config}!h:${_name}.vm!m:dns:300"
   echo "${_config}"
 }
 
