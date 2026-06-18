@@ -659,21 +659,14 @@ local  _u _g _val _tmp _ssh _type _hash _comment _from
 
 _config_vm_profile_get() {
 local _u _p _g _connfig _val _tmp _ssh _type _hash _comment _from _key
-  _config="kvm-cnf-no-net"
-  if _p=$(_config_get "vm/profile/${_runtime[profile]}/generate-ssh-keys}")
-  then
-    _config="${_config}!regenerate-ssh-host-keys"
-  fi
-  if [[ -n $(_config_find_all "vm/profile/${_runtime[profile]}/user/" key) ]]
-  then
-    for _u in $(_config_find_all "vm/profile/${_runtime[profile]}/user/" key)
-    do
+  _config="dmi-spark::"
+  if [[ -n $(_config_find_all "vm/profile/${_runtime[profile]}/user/" key) ]]; then
+    for _u in $(_config_find_all "vm/profile/${_runtime[profile]}/user/" key); do
       _p=$(_config_get "vm/profile/${_runtime[profile]}/user/${_u}")
-      if [[ -n ${_p} ]]
-      then
-        _config="${_config}!user:${_u}@${_p}"
+      if [[ -n ${_p} ]]; then
+        _config="${_config}!u:${_u}@${_p}"
       else
-        _config="${_config}!user:${_u}"
+        _config="${_config}!u:${_u}"
       fi
     done
   fi
@@ -683,7 +676,7 @@ local _u _p _g _connfig _val _tmp _ssh _type _hash _comment _from _key
     do
       for _u in $(_config_find_all "vm/profile/${_runtime[profile]}/group/${_g}" key)
       do
-        _config="${_config}!group:${_u}@${_g}"
+        _config="${_config}!g:${_u}@${_g}"
       done
     done
   fi
@@ -699,7 +692,7 @@ local _u _p _g _connfig _val _tmp _ssh _type _hash _comment _from _key
          echo $(echo "$_key" | base64 -d)
         fi
       done | base64 -w 0)
-      _config="${_config}!ssh:${_u}@${_key}"
+      _config="${_config}!s:${_u}@${_key}"
     done
   fi
   echo "${_config}"
@@ -1311,15 +1304,11 @@ local _config _name=$1
   else
     _config=$(_config_vm_profile_get)
   fi
-  if [[ ! $_config =~ ^kvm-cnf-no-net! ]]
-  then
-    _config="kvm-cnf-no-net"
-  fi
   if [[ -z ${_name} ]]
   then
     _abort_script "empty vm name given"
   fi
-  _config="${_config}!name:${_name}"
+  _config="${_config}!h:${_name}.vm!m:dns:60"
   echo "${_config}"
 }
 
@@ -1488,7 +1477,6 @@ local _params _firmware _firmware_verbose
       _abort_script "unable to prepare virtual machine cloud config!"
     fi
     _params+=( --sysinfo "oemStrings.entry0=${_config}" )
-    _params+=( --sysinfo "oemStrings.entry1='kvm-cnf-net!dns-registry:registry.dns.vm'" )
   fi
 
   if [[ ${_opts} =~ :full: ]]
@@ -2292,6 +2280,10 @@ local _name="${1}" _host="${2}" _template="${3}" _wait_params _ip _done=0 _cnt=0
   done
   if [[ -n ${_ip} ]]
   then
+    # XXX PLOTKA
+    dig @10.53.53.53 +short ":+[${_ip}].${_name}.vm" >/dev/null 2>/dev/null || true
+    sleep 0.4
+    # XXX PLOTKA
     _printf " {Y}%s\n" "${_ip}"
   else
     _printf " {Y}TIMEOUT\n"
@@ -2459,6 +2451,8 @@ local _name="${1}" _desc
     fi
   fi
   _remove_ssh_host "${_name}"
+  # XXX PLOTKA
+  dig @10.53.53.53 +short ":-${_name}.vm" >/dev/null 2>/dev/null || true
 }
 
 _vm_host_uri() {
@@ -2629,7 +2623,7 @@ local _rest=() _val _remote _action _hash _remote_hash
         then
           if _val=$(echo "${_val}" | base64 -d 2>/dev/null)
           then
-            if [[ ${_val} =~ ^kvm-cnf-no-net! ]]
+            if [[ ${_val} =~ ^dmi-spark:: ]]
             then
               export _X_SOCHA_PROFILE="${_val}"
             else
@@ -2760,8 +2754,7 @@ local _rest=() _val _remote _action _hash _remote_hash
   done
   set -- "${_rest[@]}"
 
-  if [[ -z "${1}" ]]
-  then
+  if [[ -z "${1}" ]]; then
     return 0
   fi
   _vm_parse_spec "${_action}" "$@"
@@ -2771,8 +2764,7 @@ local _rest=() _val _remote _action _hash _remote_hash
   elif [[ ${RSKVM_DO} == "viewer" ]]
   then
       _vm_run_viewer "${RSKVM_NAME}" "${RSKVM_HOST}"
-  elif [[ ${RSKVM_HOST} == "localhost" ]]
-  then
+  elif [[ ${RSKVM_HOST} == "localhost" ]]; then
     _config_default_bridge
     case "${RSKVM_DO}" in
       start)
