@@ -1849,13 +1849,10 @@ local _uuid _list _desc _state _title _os _color _protected _name _me _quiet="${
 
 _check_catalog_present() {
 local _var _name
-  for _name in $@
-  do
+  for _name in $@; do
     _var="_${_name}"
-    if [[ -z ${!_var+x} ]]
-    then
-      if [[ -z ${_image+x} ]]
-      then
+    if [[ -z ${!_var+x} ]]; then
+      if [[ -z ${_image+x} ]]; then
         _abort_script "missing catalog definition for parameter {G}${_name}"
       else
         _abort_script "missing catalog definition for parameter {G}${_name}{N} for image {Y}${_image}"
@@ -1874,7 +1871,7 @@ local _verbose
 
 # build image list
 _vm_update_images() {
-local _catalog _entry _image _format _os _variant _images _aliases _alias _info _default _storage_bus _hash _wait _ram _cpu
+local _catalog _entry _image _format _os _variant _images _aliases _alias _info _default _storage_bus _hash _arch _wait _ram _cpu
   # images are already refresehd in this session
   if [[ ${_IMAGE_REFRESHED} -eq 1 ]]
   then
@@ -1922,12 +1919,14 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
             _check_catalog_present image variant
             _config_put "image/master/${_image}/variant" "${_variant}"
             ;;
-          firmware:*)
+          firmware:*:*)
             local _firmwares _fw _firmware
             _firmwares="${1#*:}"
+            _arch="${_firmwares%:*}"
+            _firmwares="${_firmwares#*:}"
             _check_catalog_present image
             _firmware=""
-            for _fw in in ${_firmwares//,/ }
+            for _fw in ${_firmwares//,/ }
             do
               [[ -n ${_fw} ]] || continue
               case "${_fw,,}" in
@@ -1946,19 +1945,21 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
               esac
             done
             [[ -z ${_firmware} ]] || _firmware+=":"
-            _config_put "image/master/${_image}/firmware" "${_firmware}"
+            _config_put "image/master/${_image}/firmware:${_arch}" "${_firmware}"
             ;;
           storage-bus:*)
             _storage_bus="${1#*:}"
             _check_catalog_present image
             _config_put "image/master/${_image}/storage_bus" "${_storage_bus}"
             ;;
-          hash:*)
+          hash:*:*)
             _hash="${1#*:}"
+            _arch="${_hash%:*}"
+            _hash="${_hash#*:}"
             _check_catalog_present image
-            _verbose_printf "image {G}%s{N} / {M}%s{N} updated\n" "${_image}" "${_hash}"
-            _config_put "image/master/${_image}/hash" "${_hash}"
-            _config_put "image/master/${_image}/url" "${KVMREPO}/image/${_image}/${_hash}"
+            _verbose_printf "image {G}%s{N} / {M}%s{N} updated (%s)\n" "${_image}" "${_hash}" "${_arch}"
+            _config_put "image/master/${_image}/hash:${_arch}" "${_hash}"
+            _config_put "image/master/${_image}/url:${_arch}" "${KVMREPO}/image/${_image}/${_hash}"
             ;;
           ram:*)
             _ram="${1#*:}"
@@ -2011,7 +2012,7 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
             done
             ;;
           *)
-            _printf "{Y}WARNING: {N}unknow catalog option {G}${1}\n"
+            _abort_script "{Y}ERROR: {N}unknow catalog option {G}${1}\n"
         esac
         shift
       done
