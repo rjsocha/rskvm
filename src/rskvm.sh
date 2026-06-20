@@ -406,10 +406,18 @@ local _val
 }
 
 _config_host_plotka() {
-  if [[ -n ${1-} ]]; then
-    _config_put "host/${_runtime[host]}/plotka" "${1}"
+local _key
+  # "me" targets the local host config, which lives in the global config/
+  # namespace; any other host uses its /host/<name>/ entry.
+  if [[ ${_runtime[host]} == "me" ]]; then
+    _key="config/plotka"
   else
-    _config_rm "host/${_runtime[host]}/plotka"
+    _key="host/${_runtime[host]}/plotka"
+  fi
+  if [[ -n ${1-} ]]; then
+    _config_put "${_key}" "${1}"
+  else
+    _config_rm "${_key}"
   fi
 }
 
@@ -506,6 +514,10 @@ local _host="${_runtime[host]}" _val="" _w=-8
   then
     _printf "{G}%${_w}s {N}%s\n" "BRIDGE:" "$_val"
   fi
+  if _val=$(_config_get /host/${_host}/plotka)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "PLOTKA:" "$_val"
+  fi
   if _val=$(_config_get /host/${_host}/auth)
   then
     _printf "{G}%${_w}s {N}%s\n" "AUTH:" "$_val"
@@ -552,6 +564,53 @@ local _host="${_runtime[host]}" _val="" _w=-8
   #  fi
   #  _printf "{G}%${_w}s {N}%s\n" "SILENT:" "$_val"
   #fi
+}
+
+# Show the local host config, i.e. the global config/ namespace (host:me).
+_config_me_show() {
+local _val="" _w=-18
+  if _val=$(_config_get config/me)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "ME:" "$_val"
+  else
+    _printf "{G}%${_w}s {N}%s {Y}(default)\n" "ME:" "$(_who_am_i)"
+  fi
+  if _val=$(_config_get config/bridge)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "BRIDGE:" "$_val"
+  else
+    _printf "{G}%${_w}s {N}{Y}(auto)\n" "BRIDGE:"
+  fi
+  if _val=$(_config_get config/domain)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "DOMAIN:" "$_val"
+  else
+    _printf "{G}%${_w}s {N}vm {Y}(default)\n" "DOMAIN:"
+  fi
+  if _val=$(_config_get config/plotka)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "PLOTKA:" "$_val"
+  else
+    _printf "{G}%${_w}s {N}{Y}(off)\n" "PLOTKA:"
+  fi
+  if _val=$(_config_get config/ssh-vm-directory)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "SSH-VM-DIRECTORY:" "$_val"
+  else
+    _printf "{G}%${_w}s {N}{Y}(unset)\n" "SSH-VM-DIRECTORY:"
+  fi
+  if _val=$(_config_get config/default-image)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "DEFAULT-IMAGE:" "$_val"
+  else
+    _printf "{G}%${_w}s {N}{Y}(unset)\n" "DEFAULT-IMAGE:"
+  fi
+  if _val=$(_config_get config/disable-local)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "DISABLE-LOCAL:" "yes"
+  else
+    _printf "{G}%${_w}s {N}no {Y}(default)\n" "DISABLE-LOCAL:"
+  fi
 }
 
 _config_vm_ssh_key_rm() {
@@ -1013,7 +1072,11 @@ local _val
       show)
         if _require_runtime host
         then
+          if [[ ${_runtime[host]} == "me" ]]; then
+            _config_me_show
+          else
             _config_host_show
+          fi
         else
           _abort_script "missing {G}host{N} name (required for {Y}show)"
         fi
@@ -1112,6 +1175,14 @@ local _val
         fi
         shift
         ;;
+      plotka|+plotka)
+        if _require_runtime host; then
+          _config_host_plotka "${PLOTKA_DEFAULT}"
+        else
+          _abort_script "missing {G}host{N} name (required for plotka)"
+        fi
+        shift
+        ;;
       plotka:*|+plotka:*)
         if _require_runtime host; then
           _config_host_plotka "${1#*:}"
@@ -1126,6 +1197,12 @@ local _val
         else
           _abort_script "missing {G}host{N} name (required for plotka)"
         fi
+        shift
+        ;;
+      +host:me|host:me)
+        # "me" addresses the local host config (global config/ namespace);
+        # marker only, no /host/ entry is created.
+        _runtime[host]="me"
         shift
         ;;
       +host:*|host:*)
@@ -2822,6 +2899,13 @@ local _rest=() _val _remote _action _hash _remote_hash
   _vm_parse_spec "${_action}" "$@"
   if [[ ${IS_REMOTE} -eq 0 ]] && _domain=$(_config_get "config/domain"); then
     DOMAIN="${_domain}"
+  fi
+  # Local execution bypasses the remote forwarder; the local host plotka registry
+  # lives in the global config/ namespace (host:me). Default off when unset.
+  if [[ ${IS_REMOTE} -eq 0 && ${RSKVM_HOST} == "localhost" ]]; then
+    if _local_plotka=$(_config_get "config/plotka") && [[ -n ${_local_plotka} ]]; then
+      PLOTKA_SERVER="${_local_plotka}"
+    fi
   fi
   if [[ ${RSKVM_DO} == "console" ]]
   then
