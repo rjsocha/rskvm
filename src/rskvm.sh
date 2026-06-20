@@ -8,8 +8,8 @@
 # ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝  ╚═══╝  ╚═╝     ╚═╝
 #
 # Usage:
-#  rskvm [--verbose] [--force] <[--full] [--no-config] [?|+|-]name[/template][@host][:ram][:cpu]> <...>
-#  rskvm -c me:<name> +-host:<name> +-address:<address> +-user:<name> +-auth:<key|agent> +-ssh-key:<key-file> +-port:<ssh-port>
+#  rskvm [--verbose] [--verbose-create] [--force] <[--full] [--no-config] [?|+|-]name[/template][@host][:ram][:cpu]> <...>
+#  rskvm -c me:<name> +-host:<name> +-address:<address> +-user:<name> +-auth:<key|agent> +-ssh-key:<key-file> +-port:<ssh-port> +-arch:<arch> +-plotka[:<server>]
 #  rskvm config::vm +-user:<user>@[<PASSWORD|?>] +-group:<group>@<user> +-ssh-key:<user>@<ssh-public-file> +-profile:<name> get show list
 #  rskvm config::vm profile:<name> generate-ssh-keys:ON|OFF
 #  rskvm config::rskvm ssh-host:<path>
@@ -19,10 +19,15 @@
 #
 #  rskvm -c me:<name>
 #  rskvm -g ssh-vm-directory:<path>
+#  rskvm -c bridge:<name> domain:<zone>
+#
+#  Local host config (global namespace):
+#
+#    rskvm -c host:me [+-plotka[:<server>]] show
 #
 #  Host setup:
 #
-#    rskvm config:host host:<NAME> address:<FQDN> user:<USER> [port:<22>]
+#    rskvm config:host host:<NAME> address:<FQDN> user:<USER> [port:<22>] [arch:<arch>] [+-plotka[:<server>]]
 #
 #  Templates:
 #
@@ -47,6 +52,8 @@ PLOTKA_SERVER=""
 # VM domain (bare zone, without a leading dot). Default ".vm"; the dot is added
 # by _fqdn() only when the domain is non-empty. Overridable via `domain:<zone>`.
 DOMAIN="vm"
+RSKVM_ARCH="$(uname -m)"
+VERBOSE_CREATE=0
 CURL_TIMEOUT=10
 
 _trap_error() {
@@ -405,6 +412,14 @@ local _val
   fi
 }
 
+_config_host_arch() {
+  if [[ -n ${1-} ]]; then
+    _config_put "host/${_runtime[host]}/arch" "${1}"
+  else
+    _config_rm "host/${_runtime[host]}/arch"
+  fi
+}
+
 _config_host_plotka() {
 local _key
   # "me" targets the local host config, which lives in the global config/
@@ -517,6 +532,12 @@ local _host="${_runtime[host]}" _val="" _w=-8
   if _val=$(_config_get /host/${_host}/plotka)
   then
     _printf "{G}%${_w}s {N}%s\n" "PLOTKA:" "$_val"
+  fi
+  if _val=$(_config_get /host/${_host}/arch)
+  then
+    _printf "{G}%${_w}s {N}%s\n" "ARCH:" "$_val"
+  else
+    _printf "{G}%${_w}s {N}%s {Y}(default)\n" "ARCH:" "${RSKVM_ARCH}"
   fi
   if _val=$(_config_get /host/${_host}/auth)
   then
@@ -1175,6 +1196,18 @@ local _val
         fi
         shift
         ;;
+      +arch:*|arch:*|-arch)
+        if _require_runtime host; then
+          if [[ ${1} =~ : ]]; then
+            _config_host_arch "${1#*:}"
+          else
+            _config_host_arch
+          fi
+        else
+          _abort_script "missing {G}host{N} name (required for arch)"
+        fi
+        shift
+        ;;
       plotka|+plotka)
         if _require_runtime host; then
           _config_host_plotka "${PLOTKA_DEFAULT}"
@@ -1355,11 +1388,11 @@ local _addr _user _default _auth _tmp _key _port _pass=0
 
 _pull_image() {
 local _template=$1 _hash=$2 _url _format=""
-  if ! _url=$(_config_get "image/alias/by-hash/${_hash}/url")
+  if ! _url=$(_config_get "image/alias/by-hash/${_hash}/url:${RSKVM_ARCH}")
   then
     _vm_update_images_quiet
   fi
-  if _url=$(_config_get "image/alias/by-hash/${_hash}/url")
+  if _url=$(_config_get "image/alias/by-hash/${_hash}/url:${RSKVM_ARCH}")
   then
     _format="$(_config_get "image/alias/by-hash/${_hash}/format")" || true
     _format="${_format:-xz}"
@@ -1430,7 +1463,7 @@ vm_create() {
 local _name="${1}" _template="${2}" _ram=${3} _cpu=${4} _opts="${5}" _hash="${6}"
 local _os _variant _info _storage_bus
 local _template_file _template_image _template_format
-local _params _firmware _firmware_verbose
+local _params _firmware _firmware_verbose _graphics
   _check_local_access
   if [[ -z ${VM_STORAGE} ]]
   then
@@ -1472,9 +1505,9 @@ local _params _firmware _firmware_verbose
   fi
   if [[ -z ${_hash} ]]
   then
-    if ! _hash=$(_config_get "image/master/${_template}/hash")
+    if ! _hash=$(_config_get "image/master/${_template}/hash:${RSKVM_ARCH}")
     then
-      _abort_script "unable to locate {G}hash{R} for template {Y}%s" "${_template}"
+      _abort_script "unable to locate {G}hash{R} for template {Y}%s{N} (%s)" "${_template}" "${RSKVM_ARCH}"
     fi
   fi
   _template_file="${TEMPLATES}/${_template}/${_hash}"
@@ -1503,7 +1536,7 @@ local _params _firmware _firmware_verbose
   then
     _info="UNKNOW"
   fi
-  if _firmware=$(_config_get "image/master/${_template}/firmware")
+  if _firmware=$(_config_get "image/master/${_template}/firmware:${RSKVM_ARCH}")
   then
 
     if [[ ${_opts} =~ :bios: ]] && [[ ! ${_firmware} =~ :bios: ]]
@@ -1581,7 +1614,12 @@ local _params _firmware _firmware_verbose
   _params+=( --disk "path=${VM_STORAGE}/${_name}.vm,bus=${_storage_bus},cache=writeback" )
   _params+=( --network "bridge=$BRIDGE,model=virtio" )
   _params+=( --metadata title="$_name / ${_info}" )
-  _params+=( --graphics spice,image.compression=auto_glz )
+  if ! _graphics=$(_config_get "image/master/${_template}/graphics:${RSKVM_ARCH}"); then
+    _graphics="spice,image.compression=auto_glz"
+  fi
+  if [[ ${_graphics} != "none" ]]; then
+    _params+=( --graphics "${_graphics}" )
+  fi
   _params+=( --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 )
 
   if [[ ! ${_opts} =~ :noconfig: ]]
@@ -1618,6 +1656,9 @@ local _params _firmware _firmware_verbose
     _params+=( --noreboot )
   fi
   _params+=( --hvm --virt-type kvm --noautoconsole --import --quiet )
+  if [[ ${VERBOSE_CREATE} -eq 1 ]]; then
+    echo virt-install "${_params[@]}"
+  fi
   virt-install "${_params[@]}"
   _save_ssh_host "${_name}"
   _verbose_printf "{G}%s {Y}created successfully!\n" "${_name}"
@@ -1871,7 +1912,7 @@ local _verbose
 
 # build image list
 _vm_update_images() {
-local _catalog _entry _image _format _os _variant _images _aliases _alias _info _default _storage_bus _hash _arch _wait _ram _cpu
+local _catalog _entry _image _format _os _variant _images _aliases _alias _info _default _storage_bus _hash _arch _graphics _wait _ram _cpu
   # images are already refresehd in this session
   if [[ ${_IMAGE_REFRESHED} -eq 1 ]]
   then
@@ -1952,6 +1993,13 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
             _check_catalog_present image
             _config_put "image/master/${_image}/storage_bus" "${_storage_bus}"
             ;;
+          graphics:*:*)
+            _graphics="${1#*:}"
+            _arch="${_graphics%:*}"
+            _graphics="${_graphics#*:}"
+            _check_catalog_present image
+            _config_put "image/master/${_image}/graphics:${_arch}" "${_graphics}"
+            ;;
           hash:*:*)
             _hash="${1#*:}"
             _arch="${_hash%:*}"
@@ -1960,6 +2008,7 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
             _verbose_printf "image {G}%s{N} / {M}%s{N} updated (%s)\n" "${_image}" "${_hash}" "${_arch}"
             _config_put "image/master/${_image}/hash:${_arch}" "${_hash}"
             _config_put "image/master/${_image}/url:${_arch}" "${KVMREPO}/image/${_image}/${_hash}"
+            _config_link "image/master/${_image}" "image/alias/by-hash/${_hash}"
             ;;
           ram:*)
             _ram="${1#*:}"
@@ -2007,7 +2056,6 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
               _images[${_alias}]="${_image}"
               _config_link "image/master/${_image}" "image/alias/by-image/${_image}/${_alias}"
               _config_link "image/master/${_image}" "image/alias/by-name/${_alias}"
-              _config_link "image/master/${_image}" "image/alias/by-hash/${_hash}"
               _verbose_printf "  alias {Y}%s{N}\n" "${_alias}"
             done
             ;;
@@ -2676,6 +2724,9 @@ local _args=() _val
       --verbose|-v)
         VERBOSE=1
         ;;
+      --verbose-create)
+        VERBOSE_CREATE=1
+        ;;
       plotka:*)
         PLOTKA_SERVER="${_cmd#*:}"
         ;;
@@ -2984,6 +3035,9 @@ local _rest=() _val _remote _action _hash _remote_hash
     then
       _remote="${_remote} --verbose"
     fi
+    if [[ ${VERBOSE_CREATE} -eq 1 ]]; then
+      _remote="${_remote} --verbose-create"
+    fi
     case "${RSKVM_DO}" in
       create|create-wait)
         _val=$(_config_vm_profile_get)
@@ -3022,9 +3076,13 @@ local _rest=() _val _remote _action _hash _remote_hash
     then
       _remote="${_remote} --no-boot"
     fi
-    if _remote_hash=$(_config_get "image/master/${RSKVM_TEMPLATE}/hash")
+    local _remote_arch
+    _remote_arch=$(_config_get "host/${RSKVM_HOST}/arch") || _remote_arch="${RSKVM_ARCH}"
+    if _remote_hash=$(_config_get "image/master/${RSKVM_TEMPLATE}/hash:${_remote_arch}")
     then
       _remote="${_remote} hash:${_remote_hash}"
+    else
+      _abort_script "no {G}%s{N} image for template {Y}%s" "${_remote_arch}" "${RSKVM_TEMPLATE}"
     fi
     if _remote_plotka=$(_config_get "host/${RSKVM_HOST}/plotka") && [[ -n ${_remote_plotka} ]]; then
       _remote="${_remote} plotka:${_remote_plotka}"

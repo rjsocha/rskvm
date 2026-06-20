@@ -14,11 +14,6 @@ bash ./rskvm me:install
 rskvm me:update
 ```
 
-### 
-personal vm's manager (with overlay netowrk support)
-
-[![asciicast](https://asciinema.org/a/427238.svg)](https://asciinema.org/a/427238)
-
 ### Basic usage
 
 ```
