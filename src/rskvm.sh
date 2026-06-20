@@ -2155,6 +2155,7 @@ local _image _same _aliases _alias _list _default _def_ind
   _list=$(_config_find_all image/master tree | sort)
   for _image in ${_list}
   do
+    _config_get "image/master/${_image}/hash:${RSKVM_ARCH}" check || continue
     if [[ ${_default} == ${_image} ]]
     then
       _printf " {R}${_image} {C}(%s / %s)\n" "$(_config_get image/master/${_image}/os)" "$(_config_get image/master/${_image}/info)"
