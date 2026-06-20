@@ -42,6 +42,11 @@ export KVMREPO="http://image.vm.socha.it"
 export ZT_API="https://my.zerotier.com/api/v1"
 export IS_REMOTE=0
 export COLOR="${COLOR:-yes}"
+export PLOTKA_DEFAULT="10.53.53.53"
+PLOTKA_SERVER=""
+# VM domain (bare zone, without a leading dot). Default ".vm"; the dot is added
+# by _fqdn() only when the domain is non-empty. Overridable via `domain:<zone>`.
+DOMAIN="vm"
 CURL_TIMEOUT=10
 
 _trap_error() {
@@ -346,6 +351,9 @@ _config_host_add() {
       then
         _config_put "host/${1}/silent" "true"
       fi
+      if ! _config_get "host/${1}/plotka" check; then
+        _config_put "host/${1}/plotka" "${PLOTKA_DEFAULT}"
+      fi
       _runtime[host]="${1}"
     else
       _abort_script "incorrect hostname {G}%s" "${1}"
@@ -394,6 +402,14 @@ local _val
     _config_put "host/${_runtime[host]}/user" "${1}"
   else
     _config_rm "host/${_runtime[host]}/user"
+  fi
+}
+
+_config_host_plotka() {
+  if [[ -n ${1-} ]]; then
+    _config_put "host/${_runtime[host]}/plotka" "${1}"
+  else
+    _config_rm "host/${_runtime[host]}/plotka"
   fi
 }
 
@@ -1096,6 +1112,22 @@ local _val
         fi
         shift
         ;;
+      plotka:*|+plotka:*)
+        if _require_runtime host; then
+          _config_host_plotka "${1#*:}"
+        else
+          _abort_script "missing {G}host{N} name (required for plotka)"
+        fi
+        shift
+        ;;
+      -plotka|-plotka:*)
+        if _require_runtime host; then
+          _config_host_plotka
+        else
+          _abort_script "missing {G}host{N} name (required for plotka)"
+        fi
+        shift
+        ;;
       +host:*|host:*)
         _config_host_add "${1#*:}"
         shift
@@ -1123,6 +1155,11 @@ local _val
         ;;
       bridge:*)
         _config_put "config/bridge" "${1#*:}"
+        shift
+        ;;
+      domain:*)
+        local _dom="${1#*:}"
+        _config_put "config/domain" "${_dom#.}"
         shift
         ;;
       address:*|+address:*|-address)
@@ -1308,7 +1345,7 @@ local _config _name=$1
   then
     _abort_script "empty vm name given"
   fi
-  _config="${_config}!h:${_name}.vm!m:dns:300"
+  _config="${_config}!h:$(_fqdn "${_name}")!m:dns:300"
   echo "${_config}"
 }
 
@@ -1534,11 +1571,11 @@ _save_ssh_host() {
       [[ -n ${ssh_host} ]] || return 0
       [[ -e ${HOME}/.ssh/${vmd} ]] || mkdir -p "${HOME}/.ssh/${vmd}"
       {
-        printf -- "Host %s.vm\n" "${ssh_host}"
-        printf -- "  Hostname %s.vm\n" "${ssh_host}"
+        printf -- "Host %s\n" "$(_fqdn "${ssh_host}")"
+        printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
         printf -- "  User root\n"
         printf -- "Host %s\n" "${ssh_host}"
-        printf -- "  Hostname %s.vm\n" "${ssh_host}"
+        printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
       } >"${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
     fi
   fi
@@ -2280,10 +2317,8 @@ local _name="${1}" _host="${2}" _template="${3}" _wait_params _ip _done=0 _cnt=0
   done
   if [[ -n ${_ip} ]]
   then
-    # XXX PLOTKA
-    dig @10.53.53.53 +short ":+[${_ip}].${_name}.vm" >/dev/null 2>/dev/null || true
+    _plotka "+[${_ip}].$(_fqdn "${_name}")"
     sleep 0.4
-    # XXX PLOTKA
     _printf " {Y}%s\n" "${_ip}"
   else
     _printf " {Y}TIMEOUT\n"
@@ -2451,8 +2486,29 @@ local _name="${1}" _desc
     fi
   fi
   _remove_ssh_host "${_name}"
-  # XXX PLOTKA
-  dig @10.53.53.53 +short ":-${_name}.vm" >/dev/null 2>/dev/null || true
+  _plotka "-$(_fqdn "${_name}")"
+}
+
+# Register/deregister a name with the plotka DNS registry.
+# _op is the bare op token (without the leading ':'), e.g. "+[10.0.0.5].web.vm" or "-web.vm".
+# Prefers the dedicated plotka-register binary, falls back to dig, warns (verbose) if neither exists.
+# Compose a fully-qualified VM name: <name> plus the configured DOMAIN. The dot
+# separator is inserted only when DOMAIN is non-empty (empty -> bare name).
+_fqdn() {
+  printf '%s' "${1-}${DOMAIN:+.${DOMAIN}}"
+}
+
+# A disabled host has PLOTKA_SERVER empty -> no-op.
+_plotka() {
+local _op="${1-}"
+  [[ -n ${PLOTKA_SERVER} ]] || return 0
+  if command -v plotka-register &>/dev/null; then
+    plotka-register "@${PLOTKA_SERVER}" "${_op}" >/dev/null 2>&1 || true
+  elif command -v dig &>/dev/null; then
+    dig "@${PLOTKA_SERVER}" +short ":${_op}" >/dev/null 2>&1 || true
+  else
+    _verbose_printf "{Y}WARNING: {N}no {G}plotka-register{N}/{G}dig{N} available - skipping plotka {Y}%s\n" "${_op}"
+  fi
 }
 
 _vm_host_uri() {
@@ -2541,6 +2597,12 @@ local _args=() _val
         ;;
       --verbose|-v)
         VERBOSE=1
+        ;;
+      plotka:*)
+        PLOTKA_SERVER="${_cmd#*:}"
+        ;;
+      domain:*)
+        DOMAIN="${_cmd#*:}"
         ;;
       --remote)
         IS_REMOTE=1
@@ -2758,6 +2820,9 @@ local _rest=() _val _remote _action _hash _remote_hash
     return 0
   fi
   _vm_parse_spec "${_action}" "$@"
+  if [[ ${IS_REMOTE} -eq 0 ]] && _domain=$(_config_get "config/domain"); then
+    DOMAIN="${_domain}"
+  fi
   if [[ ${RSKVM_DO} == "console" ]]
   then
       _vm_run_console "${RSKVM_NAME}" "${RSKVM_HOST}"
@@ -2876,6 +2941,10 @@ local _rest=() _val _remote _action _hash _remote_hash
     then
       _remote="${_remote} hash:${_remote_hash}"
     fi
+    if _remote_plotka=$(_config_get "host/${RSKVM_HOST}/plotka") && [[ -n ${_remote_plotka} ]]; then
+      _remote="${_remote} plotka:${_remote_plotka}"
+    fi
+    _remote="${_remote} domain:${DOMAIN}"
     if ! _ssh "${RSKVM_HOST}" ${_remote}  --${RSKVM_DO} ${RSKVM_NAME}/${RSKVM_TEMPLATE}:${RSKVM_RAM}:${RSKVM_CPU}
     then
       _abort_script "remote ssh invocation failed!"
