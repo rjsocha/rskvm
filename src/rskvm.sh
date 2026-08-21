@@ -1520,20 +1520,16 @@ local _params _firmware _firmware_verbose _graphics
   then
     _abort_script "unable to locate template image {G}%s{N}/{G}%s{N} at {Y}%s" "${_template}" "${_hash}" "${TEMPLATES}"
   fi
-  if ! _os=$(_config_get "image/master/${_template}/os")
-  then
+  if ! _os=$(_config_get "image/master/${_template}/os"); then
     _os="linux"
   fi
-  if ! _variant=$(_config_get "image/master/${_template}/variant")
-  then
+  if ! _variant=$(_config_get "image/master/${_template}/variant"); then
     _variant="generic"
   fi
-  if ! _storage_bus=$(_config_get "image/master/${_template}/storage_bus")
-  then
+  if ! _storage_bus=$(_config_get "image/master/${_template}/storage_bus"); then
     _storage_bus="virtio"
   fi
-  if ! _info=$(_config_get "image/master/${_template}/info")
-  then
+  if ! _info=$(_config_get "image/master/${_template}/info"); then
     _info="UNKNOW"
   fi
   if _firmware=$(_config_get "image/master/${_template}/firmware:${RSKVM_ARCH}")
@@ -1660,7 +1656,7 @@ local _params _firmware _firmware_verbose _graphics
     echo virt-install "${_params[@]}"
   fi
   virt-install "${_params[@]}"
-  _save_ssh_host "${_name}"
+  _save_ssh_host "${_name}" "${_os}"
   _verbose_printf "{G}%s {Y}created successfully!\n" "${_name}"
 }
 
@@ -1681,6 +1677,7 @@ local _param="${1}"
 _save_ssh_host() {
   local vmd
   local ssh_host="${1-}"
+  local os="${2-}"
   local vmhost="${RSKVM_HOST}"
   [[ ${IS_REMOTE-0} -eq 0 ]] || return 0
   [[ ${vmhost} != "localhost" ]] || vmhost="$(_who_am_i)" || true
@@ -1688,13 +1685,24 @@ _save_ssh_host() {
     if [[ -n ${vmd} ]]; then
       [[ -n ${ssh_host} ]] || return 0
       [[ -e ${HOME}/.ssh/${vmd} ]] || mkdir -p "${HOME}/.ssh/${vmd}"
-      {
-        printf -- "Host %s\n" "$(_fqdn "${ssh_host}")"
-        printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
-        printf -- "  User root\n"
-        printf -- "Host %s\n" "${ssh_host}"
-        printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
-      } >"${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
+      if [[ ${os} == "windows" ]]; then
+        {
+          printf -- "Host %s %s\n" "$(_fqdn "${ssh_host}")" "${ssh_host}"
+          printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
+          printf -- "  User administrator\n"
+          printf -- "  StrictHostKeyChecking no\n"
+          printf -- "  UserKnownHostsFile /dev/null\n"
+          printf -- "  LogLevel ERROR\n"
+        } >"${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
+      else
+        {
+          printf -- "Host %s\n" "$(_fqdn "${ssh_host}")"
+          printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
+          printf -- "  User root\n"
+          printf -- "Host %s\n" "${ssh_host}"
+          printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
+        } >"${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
+      fi
     fi
   fi
 }
@@ -2412,7 +2420,9 @@ local me
 
 _vm_wait_for_me() {
 local _name="${1}" _host="${2}" _template="${3}" _wait_params _ip _done=0 _cnt=0 _wait_count _wait_sleep _wait_progress
+local os
   _wait_params=$(_config_get "/image/master/${_template}/wait_params") || true
+  os=$(_config_get "/image/master/${_template}/os") || true
   if [[ ${_wait_params} =~ ^[0-9]+:([0-9]*[.])?[0-9]+:[0-9]+$ ]]
   then
     IFS=":" read _wait_count _wait_sleep _wait_progress  <<< "${_wait_params}"
@@ -2792,7 +2802,7 @@ local _args=() _val
 }
 
 _vm_manager_process() {
-local _rest=() _val _remote _action _hash _remote_hash
+local _rest=() _val _remote _action _hash _remote_hash _os
 
   if [[ -z $1 ]]; then
     exit
@@ -2806,8 +2816,7 @@ local _rest=() _val _remote _action _hash _remote_hash
 
   _action=""
   _hash=""
-  while [[ -n "${1}" ]]
-  do
+  while [[ -n "${1}" ]]; do
     _cmd="$1"
     case "${_cmd,,}" in
        cloud-config::*|cloud-config:*)
@@ -2960,11 +2969,9 @@ local _rest=() _val _remote _action _hash _remote_hash
       PLOTKA_SERVER="${_local_plotka}"
     fi
   fi
-  if [[ ${RSKVM_DO} == "console" ]]
-  then
+  if [[ ${RSKVM_DO} == "console" ]]; then
       _vm_run_console "${RSKVM_NAME}" "${RSKVM_HOST}"
-  elif [[ ${RSKVM_DO} == "viewer" ]]
-  then
+  elif [[ ${RSKVM_DO} == "viewer" ]]; then
       _vm_run_viewer "${RSKVM_NAME}" "${RSKVM_HOST}"
   elif [[ ${RSKVM_HOST} == "localhost" ]]; then
     _config_default_bridge
@@ -2980,8 +2987,7 @@ local _rest=() _val _remote _action _hash _remote_hash
         ;;
       create-wait|create)
         vm_create ${RSKVM_NAME} ${RSKVM_TEMPLATE} ${RSKVM_RAM} ${RSKVM_CPU} "${RSKVM_OPTS}" "${_hash}"
-        if [[ ${RSKVM_DO} == "create-wait" ]] && ! [[ ${RSKVM_OPTS} =~ :noboot: ]]
-        then
+        if [[ ${RSKVM_DO} == "create-wait" ]] && ! [[ ${RSKVM_OPTS} =~ :noboot: ]]; then
           _vm_wait_for_me "${RSKVM_NAME}" "$(_who_am_i)" "${RSKVM_TEMPLATE}"
         fi
         ;;
@@ -3042,45 +3048,36 @@ local _rest=() _val _remote _action _hash _remote_hash
     case "${RSKVM_DO}" in
       create|create-wait)
         _val=$(_config_vm_profile_get)
-        if [[ -n ${_val} ]]
-        then
+        if [[ -n ${_val} ]]; then
           _val=$(echo -n "${_val}" | base64 -w 0)
           _remote="${_remote} cloud-config:${_val}"
         fi
       ;;
     esac
-    if [[ ${RSKVM_OPTS} =~ :full: ]]
-    then
+    if [[ ${RSKVM_OPTS} =~ :full: ]]; then
       _remote="${_remote} --full"
     fi
-    if [[ ${RSKVM_OPTS} =~ :noconfig: ]]
-    then
+    if [[ ${RSKVM_OPTS} =~ :noconfig: ]]; then
       _remote="${_remote} --no-config"
     fi
-    if [[ ${RSKVM_OPTS} =~ :nested: ]]
-    then
+    if [[ ${RSKVM_OPTS} =~ :nested: ]]; then
       _remote="${_remote} --nested"
     fi
-    if [[ ${RSKVM_OPTS} =~ :uefi: ]]
-    then
+    if [[ ${RSKVM_OPTS} =~ :uefi: ]]; then
       _remote="${_remote} --uefi"
     fi
-    if [[ ${RSKVM_OPTS} =~ :remoteupdate: ]]
-    then
+    if [[ ${RSKVM_OPTS} =~ :remoteupdate: ]]; then
       _remote="${_remote} --remote-update"
     fi
-    if [[ ${RSKVM_OPTS} =~ :preferuefi: ]]
-    then
+    if [[ ${RSKVM_OPTS} =~ :preferuefi: ]]; then
       _remote="${_remote} --prefer-uefi"
     fi
-    if [[ ${RSKVM_OPTS} =~ :noboot: ]]
-    then
+    if [[ ${RSKVM_OPTS} =~ :noboot: ]]; then
       _remote="${_remote} --no-boot"
     fi
     local _remote_arch
     _remote_arch=$(_config_get "host/${RSKVM_HOST}/arch") || _remote_arch="${RSKVM_ARCH}"
-    if _remote_hash=$(_config_get "image/master/${RSKVM_TEMPLATE}/hash:${_remote_arch}")
-    then
+    if _remote_hash=$(_config_get "image/master/${RSKVM_TEMPLATE}/hash:${_remote_arch}"); then
       _remote="${_remote} hash:${_remote_hash}"
     else
       _abort_script "no {G}%s{N} image for template {Y}%s" "${_remote_arch}" "${RSKVM_TEMPLATE}"
@@ -3089,14 +3086,15 @@ local _rest=() _val _remote _action _hash _remote_hash
       _remote="${_remote} plotka:${_remote_plotka}"
     fi
     _remote="${_remote} domain:${DOMAIN}"
-    if ! _ssh "${RSKVM_HOST}" ${_remote}  --${RSKVM_DO} ${RSKVM_NAME}/${RSKVM_TEMPLATE}:${RSKVM_RAM}:${RSKVM_CPU}
-    then
+    if ! _ssh "${RSKVM_HOST}" ${_remote}  --${RSKVM_DO} ${RSKVM_NAME}/${RSKVM_TEMPLATE}:${RSKVM_RAM}:${RSKVM_CPU}; then
       _abort_script "remote ssh invocation failed!"
     fi
-    set +x
+    if ! _os=$(_config_get "image/master/${RSKVM_TEMPLATE}/os"); then
+      _os="linux"
+    fi
     case "${RSKVM_DO}" in
       create|create-wait)
-        _save_ssh_host "${RSKVM_NAME}"
+        _save_ssh_host "${RSKVM_NAME}" "${_os}"
         ;;
       delete)
         _remove_ssh_host "${RSKVM_NAME}"
@@ -3104,8 +3102,7 @@ local _rest=() _val _remote _action _hash _remote_hash
     esac
   fi
   shift
-  if [[ -n ${1} ]]
-  then
+  if [[ -n ${1} ]]; then
     _vm_manager_process "$@"
   fi
 }
