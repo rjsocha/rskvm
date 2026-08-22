@@ -2604,14 +2604,16 @@ local _name="${1}" _desc
     if _is_vm_protected "${_name}"; then
       _abort_script "virtual machine {G}%s{N} is protected" "${_name}"
     fi
-    _verbose_printf "Shutting down VM {G}%s\n" "${_name}"
-    if virsh shutdown "${_name}" --mode agent &>>~/.rskvm.log; then
-      sleep 1
-    fi
-    if virsh shutdown "${_name}" &>>~/.rskvm.log; then
-      sleep 1
-    fi
+    #_verbose_printf "Shutting down VM {G}%s\n" "${_name}"
+    #if virsh shutdown "${_name}" --mode agent &>>~/.rskvm.log; then
+    #  sleep 1
+    #fi
+    #if virsh shutdown "${_name}" &>>~/.rskvm.log; then
+    #  sleep 1
+    #fi
     _verbose_printf "Removing VM {G}%s\n" "${_name}"
+    _remove_ssh_host "${_name}" || true
+    _plotka "-$(_fqdn "${_name}")" || true
     virsh destroy --domain "${_name}" &>>~/.rskvm.log || true
     # Bug in Ubuntu 22.04?
     # error: unsupported flags (0x2) in function virStorageBackendVolDeleteLocal
@@ -2619,11 +2621,9 @@ local _name="${1}" _desc
     virsh undefine --domain "${_name}" --remove-all-storage --managed-save --snapshots-metadata --checkpoints-metadata --nvram &>>~/.rskvm.log || true
     if [[ -f ${VM_STORAGE}/${_name}.vm ]]; then
       _printf "orphan image: {R}%s.vm\n" "${_name}"
-      rm -f "${VM_STORAGE}/${_name}.vm"
+      rm -f "${VM_STORAGE}/${_name}.vm" || true
     fi
   fi
-  _remove_ssh_host "${_name}"
-  _plotka "-$(_fqdn "${_name}")"
 }
 
 # Register/deregister a name with the plotka DNS registry.
