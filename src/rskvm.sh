@@ -1689,7 +1689,8 @@ _save_ssh_host() {
         {
           printf -- "Host %s %s\n" "$(_fqdn "${ssh_host}")" "${ssh_host}"
           printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
-          printf -- "  User administrator\n"
+          printf -- "  #User administrator\n"
+          printf -- "  User rootr\n"
           printf -- "  StrictHostKeyChecking no\n"
           printf -- "  UserKnownHostsFile /dev/null\n"
           printf -- "  LogLevel ERROR\n"
