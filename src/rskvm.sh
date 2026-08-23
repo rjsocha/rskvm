@@ -13,7 +13,7 @@
 #  rskvm config::vm +-user:<user>@[<PASSWORD|?>] +-group:<group>@<user> +-ssh-key:<user>@<ssh-public-file> +-profile:<name> get show list
 #  rskvm config::vm profile:<name> generate-ssh-keys:ON|OFF
 #  rskvm config::rskvm ssh-host:<path>
-#  rskvm me:install me:version
+#  rskvm me:install me:version me:completion
 #
 #  Basic setup:
 #
@@ -33,6 +33,7 @@
 #
 #    rskvm default-image:<name>
 #    rskvm --image-list | --image-update | --image-unused [--purge] |  rskvm --image-used
+#    rskvm --pull <[+]name/template[@host]> <...>
 #
 # EOU
 set -eE
@@ -1443,6 +1444,43 @@ local _template=$1 _hash=$2 _url _format=""
   fi
 }
 
+_vm_pull_image() {
+local _template="${1}" _hash="${2}" _template_file
+  _check_local_access
+  if [[ -z ${TEMPLATES} ]]
+  then
+    _abort_script "missing {G}TEMPLATES{N} env!"
+  fi
+  if [[ -z ${_hash} ]]
+  then
+    if ! _hash=$(_config_get "image/master/${_template}/hash:${RSKVM_ARCH}")
+    then
+      _abort_script "unable to locate {G}hash{R} for template {Y}%s{N} (%s)" "${_template}" "${RSKVM_ARCH}"
+    fi
+  fi
+  _template_file="${TEMPLATES}/${_template}/${_hash}"
+  if [[ -f ${_template_file} ]]
+  then
+    _verbose_printf "Image template {G}%s{N}/{G}%s{N} already present\n" "${_template}" "${_hash}"
+    return 0
+  fi
+  if [[ ! -d ${TEMPLATES} ]]
+  then
+    _verbose_printf "Creating virtual machine template directory at {G}%s\n" "${TEMPLATES}"
+    mkdir -p "${TEMPLATES}"
+  fi
+  if [[ ! -d ${TEMPLATES} ]]
+  then
+    _abort_script "unable to create {G}template{N} directory at {Y}%s" "${TEMPLATES}"
+  fi
+  _verbose_printf "Looking for image template {G}%s{N}/{G}%s{N} at {Y}%s\n" "${_template}" "${_hash}" "${KVMREPO}"
+  _pull_image "${_template}" "${_hash}"
+  if [[ ! -f ${_template_file} ]]
+  then
+    _abort_script "unable to retrieve image template {G}%s{N}/{G}%s{N}" "${_template}" "${_hash}"
+  fi
+}
+
 vm_config() {
 local _config _name=$1
   if [[ -n "${_X_SOCHA_PROFILE}" ]]
@@ -1461,7 +1499,7 @@ local _config _name=$1
 
 vm_create() {
 local _name="${1}" _template="${2}" _ram=${3} _cpu=${4} _opts="${5}" _hash="${6}"
-local _os _variant _info _storage_bus
+local _os _variant _info _storage_bus _user
 local _template_file _template_image _template_format
 local _params _firmware _firmware_verbose _graphics
   _check_local_access
@@ -1522,6 +1560,9 @@ local _params _firmware _firmware_verbose _graphics
   fi
   if ! _os=$(_config_get "image/master/${_template}/os"); then
     _os="linux"
+  fi
+  if ! _user=$(_config_get "image/master/${_template}/user:root"); then
+    _user=""
   fi
   if ! _variant=$(_config_get "image/master/${_template}/variant"); then
     _variant="generic"
@@ -1656,7 +1697,7 @@ local _params _firmware _firmware_verbose _graphics
     echo virt-install "${_params[@]}"
   fi
   virt-install "${_params[@]}"
-  _save_ssh_host "${_name}" "${_os}"
+  _save_ssh_host "${_name}" "${_os}" "${_user}"
   _verbose_printf "{G}%s {Y}created successfully!\n" "${_name}"
 }
 
@@ -1678,8 +1719,16 @@ _save_ssh_host() {
   local vmd
   local ssh_host="${1-}"
   local os="${2-}"
+  local user="${3-}"
   local vmhost="${RSKVM_HOST}"
   [[ ${IS_REMOTE-0} -eq 0 ]] || return 0
+  if [[ -z ${user} ]]; then
+    if [[ ${os} == "windows" ]]; then
+      user="administrator"
+    else
+      user="root"
+    fi
+  fi
   [[ ${vmhost} != "localhost" ]] || vmhost="$(_who_am_i)" || true
   if vmd=$(_config_get "config/ssh-vm-directory"); then
     if [[ -n ${vmd} ]]; then
@@ -1689,8 +1738,7 @@ _save_ssh_host() {
         {
           printf -- "Host %s %s\n" "$(_fqdn "${ssh_host}")" "${ssh_host}"
           printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
-          printf -- "  #User administrator\n"
-          printf -- "  User root\n"
+          printf -- "  User %s\n" "${user}"
           printf -- "  StrictHostKeyChecking no\n"
           printf -- "  UserKnownHostsFile /dev/null\n"
           printf -- "  LogLevel ERROR\n"
@@ -1699,7 +1747,7 @@ _save_ssh_host() {
         {
           printf -- "Host %s\n" "$(_fqdn "${ssh_host}")"
           printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
-          printf -- "  User root\n"
+          printf -- "  User %s\n" "${user}"
           printf -- "Host %s\n" "${ssh_host}"
           printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
         } >"${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
@@ -2019,6 +2067,14 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
             _config_put "image/master/${_image}/url:${_arch}" "${KVMREPO}/image/${_image}/${_hash}"
             _config_link "image/master/${_image}" "image/alias/by-hash/${_hash}"
             ;;
+          user:*:*)
+            local _role _user
+            _user="${1#*:}"
+            _role="${_user%:*}"
+            _user="${_user#*:}"
+            _check_catalog_present image
+            _config_put "image/master/${_image}/user:${_role}" "${_user}"
+            ;;
           ram:*)
             _ram="${1#*:}"
             if [[ ${_ram} =~ ^[0-9]+$ ]]
@@ -2226,7 +2282,8 @@ local me="$(_who_am_i)"
       if [[ -z ${_do} ]] || [[ ${_do} == "create-wait" ]] || [[ ${_do} == "create" ]]
       then
         _do="create-wait"
-      else
+      elif [[ ${_do} != "pull" ]]
+      then
         _abort_script "other action selected: {Y}%s" "${_do}"
       fi
     elif [[ ${_cmd::1} == "^" ]]
@@ -2298,7 +2355,7 @@ local me="$(_who_am_i)"
   then
     _cpu=0
   fi
-  if [[ ! ${_do} =~ ^(delete|create|create-wait|query|start|stop|console|viewer|guard|protect|unguard|unprotect|hide|unhide|exists|commit)$ ]]
+  if [[ ! ${_do} =~ ^(delete|create|create-wait|query|start|stop|console|viewer|guard|protect|unguard|unprotect|hide|unhide|exists|commit|pull)$ ]]
   then
     _abort_script "unknow {G}action{N}: {Y}${_do}"
   fi
@@ -2803,7 +2860,7 @@ local _args=() _val
 }
 
 _vm_manager_process() {
-local _rest=() _val _remote _action _hash _remote_hash _os
+local _rest=() _val _remote _action _hash _remote_hash _os _user
 
   if [[ -z $1 ]]; then
     exit
@@ -2921,6 +2978,9 @@ local _rest=() _val _remote _action _hash _remote_hash _os
       --boot)
         RSKVM_OPTS="${RSKVM_OPTS//noboot:/}"
         ;;
+      --pull)
+        _action="pull"
+        ;;
       --delete|--destroy)
         _action="delete"
         ;;
@@ -2975,7 +3035,9 @@ local _rest=() _val _remote _action _hash _remote_hash _os
   elif [[ ${RSKVM_DO} == "viewer" ]]; then
       _vm_run_viewer "${RSKVM_NAME}" "${RSKVM_HOST}"
   elif [[ ${RSKVM_HOST} == "localhost" ]]; then
-    _config_default_bridge
+    if [[ ${RSKVM_DO} != "pull" ]]; then
+      _config_default_bridge
+    fi
     case "${RSKVM_DO}" in
       start)
         _vm_start "${RSKVM_NAME}"
@@ -2991,6 +3053,9 @@ local _rest=() _val _remote _action _hash _remote_hash _os
         if [[ ${RSKVM_DO} == "create-wait" ]] && ! [[ ${RSKVM_OPTS} =~ :noboot: ]]; then
           _vm_wait_for_me "${RSKVM_NAME}" "$(_who_am_i)" "${RSKVM_TEMPLATE}"
         fi
+        ;;
+      pull)
+        _vm_pull_image "${RSKVM_TEMPLATE}" "${_hash}"
         ;;
       query)
         _val=$(_vm_get_ip4_addr "${RSKVM_NAME}")
@@ -3093,9 +3158,12 @@ local _rest=() _val _remote _action _hash _remote_hash _os
     if ! _os=$(_config_get "image/master/${RSKVM_TEMPLATE}/os"); then
       _os="linux"
     fi
+    if ! _user=$(_config_get "image/master/${RSKVM_TEMPLATE}/user:root"); then
+      _user=""
+    fi
     case "${RSKVM_DO}" in
       create|create-wait)
-        _save_ssh_host "${RSKVM_NAME}" "${_os}"
+        _save_ssh_host "${RSKVM_NAME}" "${_os}" "${_user}"
         ;;
       delete)
         _remove_ssh_host "${RSKVM_NAME}"
@@ -3444,6 +3512,65 @@ _install() {
   exit 0
 }
 
+_completion() {
+  printf "%s\n" \
+    '__rskvm_bash() {' \
+    '  local cur prev words cword split;' \
+    '  _init_completion -s || return;' \
+    '  COMPREPLY=()' \
+    '' \
+    '  if [[ ${cur} =~ ^\+([a-z][a-z0-9-]+/[a-z0-9-]+)@ ]] || [[ ${cur} =~ ^\+([a-z][a-z0-9-]+)@ ]]' \
+    '  then' \
+    '    local host hosts=()' \
+    '    for host in $(find ~/.config/rskvm/host/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n")' \
+    '    do' \
+    '      hosts+="+${BASH_REMATCH[1]}@${host} "' \
+    '    done' \
+    '    COMPREPLY=($(compgen -W "${hosts}" -- "${cur}"))' \
+    '  elif [[ ${cur} =~ ^\+([a-z][a-z0-9-]+)/ ]]' \
+    '  then' \
+    '    local ll xx=()' \
+    '    for ll in $(find ~/.config/rskvm/image/alias/by-name/ -maxdepth 1 -mindepth 1 -printf "%f\n")' \
+    '    do' \
+    '      xx+="+${BASH_REMATCH[1]}/${ll} "' \
+    '    done' \
+    '    COMPREPLY=($(compgen -W "${xx}" -- "${cur}"))' \
+    '  elif [[ ${cur::2} == "--" ]]' \
+    '  then' \
+    '    COMPREPLY=($(compgen -W "--image-list --image-update --image-unused --image-used --start --stop --console --full --verbose --no-config --update --remote-update --nested --link --prefer-uefi --bios --uefi --query --protect --unprotect --hide --unhide --exists --rebase --no-boot --boot --pull" -- "${cur}"))' \
+    '  elif [[ ${cur::1} == "-" ]]; then' \
+    '    [[ -e ~/.ssh/vm.d ]] || return 0' \
+    '    local _host _hosts' \
+    '    for _host in $(find ~/.ssh/vm.d/ -maxdepth 1 -mindepth 1 -type f -printf "%f\n"); do' \
+    '      if [[ ${cword} -gt 1 ]]; then' \
+    '        local _n _c=0' \
+    '        for _n in ${COMP_WORDS[@]}' \
+    '        do' \
+    '          if [[ ${_n} =~ -${_host}(@|$) ]]' \
+    '          then' \
+    '            _c=1' \
+    '            break' \
+    '          fi' \
+    '        done' \
+    '        if [[ $_c -eq 1 ]]' \
+    '        then' \
+    '          continue' \
+    '        fi' \
+    '      fi' \
+    '      _hosts+="-${_host} "' \
+    '    done' \
+    '    local _words=($(compgen -W "${_hosts}" -- "$cur"))' \
+    '    if [[ ${#_words[@]} -eq 1 ]]; then' \
+    '      local _host=${_words[@]}' \
+    '      _host="${_host:1}"' \
+    '      #_words=( "${_words[@]}${_host}" )' \
+    '    fi' \
+    '    COMPREPLY=( ${_words[@]} )' \
+    '  fi' \
+    '}' \
+    'complete -F __rskvm_bash rskvm'
+}
+
 _check_runtime() {
   command -v virt-install &>/dev/null || _abort_script "{G}virt-install{R} is required..."
   command -v curl &>/dev/null || _abort_script "{G}curl{R} is required..."
@@ -3578,6 +3705,11 @@ export LC_ALL=C
 _IMAGE_REFRESHED=0
 #PAYLOAD
 #/PAYLOAD
+
+if [[ "$1" == "me:completion" ]]; then
+  _completion
+  exit 0
+fi
 
 _check_runtime
 
