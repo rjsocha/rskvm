@@ -2,6 +2,28 @@
 #
 # Usage:
 #
+#  rskvm [<options>] [+|-|?]<name>[/<template>][@<host>][:<ram>[:<cpu>]] <...>
+#
+#    +name   create        -name   delete        ?name   print the address
+#
+#  rskvm --list [<host>|@]                    list VMs
+#  rskvm --image-list                         list templates
+#  rskvm ssh:<name>[@<host>] [<ssh-args>]     ssh to a VM
+#
+#  rskvm -c host:<name> address:<fqdn> user:<user>   configure a host
+#  rskvm -c list                              list configured hosts
+#  rskvm -c show:me                           show the local configuration
+#  rskvm -m ...                               configure VM profiles
+#  rskvm -g ssh-vm-directory:<path>           configure rskvm
+#
+#  rskvm me:install | me:update | me:version | me:completion
+#
+#  rskvm --usage                              full command reference
+#
+# EOU
+#
+# Reference:
+#
 #  rskvm [<options>] <vm-spec> [<vm-spec> ...]
 #
 #  VM spec:
@@ -10,7 +32,7 @@
 #
 #      +name      create and wait for the VM (default when no prefix given)
 #      -name      delete
-#      ?name      print the IPv4 address (alias: .name)
+#      ?name      print the IPv4 address
 #      ^name      print 1 when the VM exists, 0 otherwise
 #
 #      name       [a-z0-9][a-z0-9-]*[a-z0-9], 2..63 characters
@@ -129,7 +151,7 @@
 #    rskvm -g ssh-vm-directory:<path>
 #    source <(rskvm me:completion)
 #
-# EOU
+# EOR
 set -eE
 
 export ME=rskvm
@@ -270,7 +292,16 @@ local _v="$1"
 
 _usage() {
 local _me=$(realpath -eq $0)
+  _printf "{Y}{N}" >&2
   sed -n '/^# Usage/,${p;/^# EOU/q}' "${_me}" | head -q -n-1 | sed "s/^#//" >&2
+  _printf "{N}{N}" >&2
+}
+
+_reference() {
+local _me=$(realpath -eq $0)
+  _printf "{Y}{N}" >&2
+  sed -n '/^# Reference/,${p;/^# EOR/q}' "${_me}" | head -q -n-1 | sed "s/^#//" >&2
+  _printf "{N}{N}" >&2
 }
 
 _config_rm() {
@@ -554,6 +585,24 @@ local _val
     fi
   else
     _config_rm "host/${_runtime[host]}/key"
+  fi
+}
+
+_config_host_select() {
+  if [[ -n $1 ]]
+  then
+    if _verify_hostname "$1"
+    then
+      if [[ ! -d ${CONFIG}/host/${1} ]]
+      then
+        _abort_script "unknown host {G}%s{N}, add it with {G}-c +host:%s" "${1}" "${1}"
+      fi
+      _runtime[host]="${1}"
+    else
+      _abort_script "incorrect hostname {G}%s" "${1}"
+    fi
+  else
+    _abort_script "missing hostname for {G}-c host:<name>{N}"
   fi
 }
 
@@ -1132,25 +1181,37 @@ local _size _avail
 
 _cpu_model() {
 local _cpu
-  _cpu=$(grep "model name" /proc/cpuinfo | head -n 1)
+  if ! _cpu=$(grep -m 1 "^model name" /proc/cpuinfo)
+  then
+    if ! _cpu=$(grep -m 1 "^Model" /proc/cpuinfo)
+    then
+      _cpu=": unknown"
+    fi
+  fi
   echo -n "${_cpu##*: }"
 }
 
 _cpu_all_cores() {
 local _cores
-  _cores=$(grep "model name" /proc/cpuinfo | wc -l)
+  _cores=$(grep -c "^processor" /proc/cpuinfo)
   echo -n "${_cores}"
 }
 
 _cpu_phy_cores() {
 local _cores
-  _cores=$(cat /proc/cpuinfo | grep "cpu cores" | head -n 1)
-  echo -n "${_cores##*: }"
+  if _cores=$(grep -m 1 "^cpu cores" /proc/cpuinfo)
+  then
+    _cores="${_cores##*: }"
+  else
+    _cores=$(grep -c "^processor" /proc/cpuinfo)
+  fi
+  echo -n "${_cores}"
 }
 
 _cpu_sockets() {
 local _sockets
-  _sockets=$(cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l)
+  _sockets=$(grep "^physical id" /proc/cpuinfo | sort -u | wc -l)
+  [[ ${_sockets} -gt 0 ]] || _sockets=1
   echo -n "${_sockets}"
 }
 
@@ -1333,8 +1394,12 @@ local _val
         _runtime[host]="me"
         shift
         ;;
-      +host:*|host:*)
+      +host:*)
         _config_host_add "${1#*:}"
+        shift
+        ;;
+      host:*)
+        _config_host_select "${1#*:}"
         shift
         ;;
       -host:*)
@@ -2389,7 +2454,7 @@ local me="$(_who_am_i)"
       else
         _abort_script "other action selected: {Y}%s" "${_do}"
       fi
-    elif [[ ${_cmd::1} == "." ]] || [[ ${_cmd::1} == "?" ]]
+    elif [[ ${_cmd::1} == "?" ]]
     then
       _cmd="${_cmd:1}"
       if [[ -z ${_do} ]] || [[ ${_do} == "query" ]]
@@ -2463,7 +2528,7 @@ local me="$(_who_am_i)"
   fi
   if ! _verify_name "${_name}"
   then
-    _abort_script "incorrect name: {Y}%s {N}allowed characters: {Y}[a-z0-9][a-z0-9-]*[a-z0-9]" "${_name}"
+    _abort_script "incorrect name: {Y}%s {N}allowed characters: {Y}[a-z][a-z0-9.-]*[a-z0-9]" "${_name}"
   fi
   if ! _verify_hostname "${_host}"
   then
@@ -2875,6 +2940,10 @@ local _args=() _val
     case "${_cmd,,}" in
       --help|-h)
         _usage
+        exit 1
+        ;;
+      --usage)
+        _reference
         exit 1
         ;;
       --list|-l)
@@ -3609,8 +3678,9 @@ _install() {
 _completion() {
   printf "%s\n" \
     '__rskvm_bash() {' \
-    '  local cur prev words cword split;' \
-    '  _init_completion -s || return;' \
+    '  local cur prev words cword split _nospace=0;' \
+    '  declare -F _init_completion >/dev/null || return;' \
+    '  _init_completion -s -n : || return;' \
     '  COMPREPLY=()' \
     '' \
     '  if [[ ${cword} -ge 2 && ${COMP_WORDS[1]} == "-c" ]]' \
@@ -3628,11 +3698,7 @@ _completion() {
     '    else' \
     '      COMPREPLY=($(compgen -W "list show show:me info ssh get:uri key -key auth:key auth:agent plotka -plotka user: port: arch: address: host: -host: me: bridge: domain: disable:local -disable:local --verbose" -- "${cur}"))' \
     '    fi' \
-    '    [[ ${#COMPREPLY[@]} -ne 1 || ${COMPREPLY[0]} != *: ]] || compopt -o nospace' \
-    '    return 0' \
-    '  fi' \
-    '' \
-    '  if [[ ${cur} =~ ^\+([a-z][a-z0-9-]+/[a-z0-9-]+)@ ]] || [[ ${cur} =~ ^\+([a-z][a-z0-9-]+)@ ]]' \
+    '  elif [[ ${cur} =~ ^\+([a-z][a-z0-9.-]+/[a-z0-9.-]+)@ ]] || [[ ${cur} =~ ^\+([a-z][a-z0-9.-]+)@ ]]' \
     '  then' \
     '    local host hosts=()' \
     '    for host in $(find ~/.config/rskvm/host/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n")' \
@@ -3640,7 +3706,8 @@ _completion() {
     '      hosts+="+${BASH_REMATCH[1]}@${host} "' \
     '    done' \
     '    COMPREPLY=($(compgen -W "${hosts}" -- "${cur}"))' \
-    '  elif [[ ${cur} =~ ^\+([a-z][a-z0-9-]+)/ ]]' \
+    '    _nospace=1' \
+    '  elif [[ ${cur} =~ ^\+([a-z][a-z0-9.-]+)/ ]]' \
     '  then' \
     '    local ll xx=()' \
     '    for ll in $(find ~/.config/rskvm/image/alias/by-name/ -maxdepth 1 -mindepth 1 -printf "%f\n")' \
@@ -3648,42 +3715,45 @@ _completion() {
     '      xx+="+${BASH_REMATCH[1]}/${ll} "' \
     '    done' \
     '    COMPREPLY=($(compgen -W "${xx}" -- "${cur}"))' \
+    '    _nospace=1' \
     '  elif [[ ${cur::2} == "--" ]]' \
     '  then' \
-    '    COMPREPLY=($(compgen -W "--help --list --lq --verbose --verbose-create --force --image-list --image-update --image-flush --image-used --image-unused --purge --create --wait --delete --query --exists --start --stop --console --view --pull --commit --protect --unprotect --hide --unhide --full --link --nested --boot --no-boot --no-config --uefi --bios --prefer-uefi --update --remote-update" -- "${cur}"))' \
-    '  elif [[ ${cur::1} == "-" ]]; then' \
-    '    local _vmd=""' \
+    '    COMPREPLY=($(compgen -W "--help --usage --list --lq --verbose --verbose-create --force --image-list --image-update --image-flush --image-used --image-unused --purge --create --wait --delete --query --exists --start --stop --console --view --pull --commit --protect --unprotect --hide --unhide --full --link --nested --boot --no-boot --no-config --uefi --bios --prefer-uefi --update --remote-update" -- "${cur}"))' \
+    '  elif [[ ${cur::1} == "-" || ${cur::1} == "?" ]]' \
+    '  then' \
+    '    local _pfx="${cur::1}" _vmd="" _host _hosts=""' \
     '    { read -r _vmd < ~/.config/rskvm/config/ssh-vm-directory; } 2>/dev/null' \
     '    [[ -n ${_vmd} ]] || _vmd="vm.d"' \
-    '    [[ -d ~/.ssh/${_vmd} ]] || return 0' \
-    '    local _host _hosts' \
-    '    for _host in $(find ~/.ssh/${_vmd}/ -maxdepth 1 -mindepth 1 -type f -printf "%f\n"); do' \
-    '      if [[ ${cword} -gt 1 ]]; then' \
-    '        local _n _c=0' \
-    '        for _n in ${COMP_WORDS[@]}' \
-    '        do' \
-    '          if [[ ${_n} =~ -${_host}(@|$) ]]' \
-    '          then' \
-    '            _c=1' \
-    '            break' \
-    '          fi' \
-    '        done' \
-    '        if [[ $_c -eq 1 ]]' \
+    '    if [[ -d ~/.ssh/${_vmd} ]]' \
+    '    then' \
+    '      for _host in $(find ~/.ssh/${_vmd}/ -maxdepth 1 -mindepth 1 -type f -printf "%f\n")' \
+    '      do' \
+    '        if [[ ${_pfx} == "-" && ${cword} -gt 1 ]]' \
     '        then' \
-    '          continue' \
+    '          local _n _c=0' \
+    '          for _n in ${COMP_WORDS[@]}' \
+    '          do' \
+    '            if [[ ${_n} == "-${_host}" ]]' \
+    '            then' \
+    '              _c=1' \
+    '              break' \
+    '            fi' \
+    '          done' \
+    '          [[ ${_c} -eq 0 ]] || continue' \
     '        fi' \
-    '      fi' \
-    '      _hosts+="-${_host} "' \
-    '    done' \
-    '    [[ ${cword} -ne 1 ]] || _hosts+="-c -m -g -l -t -v -f -u -b -h "' \
-    '    local _words=($(compgen -W "${_hosts}" -- "$cur"))' \
-    '    if [[ ${#_words[@]} -eq 1 ]]; then' \
-    '      local _host=${_words[@]}' \
-    '      _host="${_host:1}"' \
-    '      #_words=( "${_words[@]}${_host}" )' \
+    '        _hosts+="${_pfx}${_host} "' \
+    '      done' \
     '    fi' \
-    '    COMPREPLY=( ${_words[@]} )' \
+    '    [[ ${_pfx} != "-" || ${cword} -ne 1 ]] || _hosts+="-c -m -g -l -t -v -f -u -b -h "' \
+    '    COMPREPLY=($(compgen -W "${_hosts}" -- "${cur}"))' \
     '  fi' \
+    '' \
+    '  if declare -F __ltrim_colon_completions >/dev/null' \
+    '  then' \
+    '    __ltrim_colon_completions "${cur}"' \
+    '  fi' \
+    '  [[ ${#COMPREPLY[@]} -ne 1 || ${COMPREPLY[0]} != *: ]] || _nospace=1' \
+    '  [[ ${_nospace} -eq 0 ]] || compopt -o nospace' \
     '}' \
     'complete -F __rskvm_bash rskvm'
 }
