@@ -283,16 +283,16 @@ local _v="$1"
 
 _usage() {
 local _me=$(realpath -eq $0)
-  _printf "{Y}{N}" >&2
-  sed -n '/^# Usage/,${p;/^# EOU/q}' "${_me}" | head -q -n-1 | sed "s/^#//" >&2
-  _printf "{N}{N}" >&2
+  _printf "{Y}{N}"
+  sed -n '/^# Usage/,${p;/^# EOU/q}' "${_me}" | head -q -n-1 | sed "s/^#//"
+  _printf "{N}{N}"
 }
 
 _reference() {
 local _me=$(realpath -eq $0)
-  _printf "{Y}{N}" >&2
-  sed -n '/^# Reference/,${p;/^# EOR/q}' "${_me}" | head -q -n-1 | sed "s/^#//" >&2
-  _printf "{N}{N}" >&2
+  _printf "{Y}{N}"
+  sed -n '/^# Reference/,${p;/^# EOR/q}' "${_me}" | head -q -n-1 | sed "s/^#//"
+  _printf "{N}{N}"
 }
 
 _config_rm() {
@@ -1995,9 +1995,21 @@ local _val
 }
 
 _list_all_vm() {
-local _host _quiet="${1}"
+local _host _quiet="${1}" _me
+  _me="$(_who_am_i)"
+  if ! _config_get "config/disable-local" check
+  then
+    if ! _list_vm ${_quiet} "@${_me}"
+    then
+      :
+    fi
+  fi
   for _host in $(_config_find_all host tree)
   do
+    if [[ ${_host} == ${_me} ]]
+    then
+      continue
+    fi
     if ! _list_vm ${_quiet} "@${_host}"
     then
       :
@@ -3633,7 +3645,7 @@ _install() {
 _completion() {
   printf "%s\n" \
     '__rskvm_bash() {' \
-    '  local cur prev words cword split _nospace=0;' \
+    '  local cur words cword _nospace=0;' \
     '  declare -F _init_completion >/dev/null || return;' \
     '  _init_completion -s -n : || return;' \
     '  COMPREPLY=()' \
@@ -3688,7 +3700,7 @@ _completion() {
     '    local host hosts=()' \
     '    for host in $(find ~/.config/rskvm/host/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n")' \
     '    do' \
-    '      hosts+="+${BASH_REMATCH[1]}@${host} "' \
+    '      hosts+="+${BASH_REMATCH[1]}@${host}: "' \
     '    done' \
     '    COMPREPLY=($(compgen -W "${hosts}" -- "${cur}"))' \
     '    _nospace=1' \
@@ -3701,9 +3713,21 @@ _completion() {
     '    done' \
     '    COMPREPLY=($(compgen -W "${xx}" -- "${cur}"))' \
     '    _nospace=1' \
+    '  elif [[ ${cword} -eq 1 && -n ${cur} && ( ${cur} == me:* || me: == ${cur}* ) ]]' \
+    '  then' \
+    '    COMPREPLY=($(compgen -W "me:install me:update me:version me:completion" -- "${cur}"))' \
     '  elif [[ ${cur::2} == "--" ]]' \
     '  then' \
-    '    COMPREPLY=($(compgen -W "--help --usage --list --lq --verbose --verbose-create --force --image-list --image-update --image-flush --image-used --image-unused --purge --create --wait --delete --query --exists --start --stop --console --view --pull --commit --protect --unprotect --hide --unhide --full --link --nested --boot --no-boot --no-config --uefi --bios --prefer-uefi --update --remote-update" -- "${cur}"))' \
+    '    local _o _opts="--help --usage --list --lq --verbose --verbose-create --force --image-list --image-update --image-flush --image-used --image-unused --create --wait --delete --query --exists --start --stop --console --view --pull --commit --protect --unprotect --hide --unhide --full --link --nested --boot --no-boot --no-config --uefi --bios --prefer-uefi --update --remote-update"' \
+    '    for _o in ${COMP_WORDS[@]}' \
+    '    do' \
+    '      if [[ ${_o} == "--image-unused" ]]' \
+    '      then' \
+    '        _opts="${_opts} --purge"' \
+    '        break' \
+    '      fi' \
+    '    done' \
+    '    COMPREPLY=($(compgen -W "${_opts}" -- "${cur}"))' \
     '  elif [[ ${cur::1} == "-" || ${cur::1} == "?" ]]' \
     '  then' \
     '    local _pfx="${cur::1}" _vmd="" _host _hosts=""' \
