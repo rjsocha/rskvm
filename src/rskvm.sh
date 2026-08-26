@@ -624,7 +624,13 @@ local _host="$1" _val=""
 }
 
 _config_host_list() {
-  _config_find_all host tree | sort
+local _me _val
+  if ! _val=$(_config_get "config/mode") || [[ ${_val} != "client" ]]
+  then
+    _me="$(_who_am_i)"
+    _printf "{Y}%s\n" "${_me}"
+  fi
+  _config_find_all host tree | sort | grep -v "^${_me}$" || true
 }
 
 _config_host_show_key() {
