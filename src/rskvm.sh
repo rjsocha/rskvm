@@ -28,7 +28,7 @@
 #      +name      create and wait for the VM (default when no prefix given)
 #      -name      delete
 #      ?name      print the IPv4 address
-#      ^name      print 1 when the VM exists, 0 otherwise
+#      ^name      exit code 0 when the VM exists, 1 otherwise
 #
 #      name       [a-z0-9][a-z0-9-]*[a-z0-9], 2..63 characters
 #      template   image name or alias (--image-list), default: default-image
@@ -44,7 +44,7 @@
 #    --wait               create and wait for the VM to boot
 #    --delete             delete
 #    --query              print the IPv4 address
-#    --exists             print 1/0
+#    --exists             exit code 0 when the VM exists, 1 otherwise
 #    --start              start
 #    --stop               shutdown via guest agent, then ACPI
 #    --console            attach to the serial console
@@ -64,19 +64,19 @@
 #    --no-boot            leave the VM down after creation
 #    --boot               boot after creation, default, cancels --no-boot
 #    --no-config          skip cloud config injection
-#    --uefi               force UEFI firmware (-u)
-#    --bios               force BIOS firmware (-b)
+#    --uefi               force UEFI firmware
+#    --bios               force BIOS firmware
 #    --prefer-uefi        UEFI when the template supports it
 #    --update             refresh the template catalog locally and on the host
 #    --remote-update      refresh the template catalog on the host only
-#    --force              allow more than 32 vCPU or 65536 MiB RAM (-f)
+#    --force              allow more than 32 vCPU or 65536 MiB RAM
 #    profile:<name>       cloud config profile used for this VM
 #
 #  Listing:
 #
-#    rskvm --list [<host>|@]          list VMs (-l), @ covers every host
-#    rskvm --lq [<host>|@]            the same, machine readable
-#    rskvm --image-list               list templates (-t)
+#    rskvm --list [<host>|@]          list VMs (-l), @ covers every host (-l@)
+#    rskvm --lq [<host>|@]            the same, machine readable (--lq@)
+#    rskvm --image-list               list templates
 #    rskvm --image-update             refresh the template catalog
 #    rskvm --image-flush              drop downloaded templates
 #    rskvm --image-used               templates currently in use
@@ -2947,9 +2947,18 @@ local _args=() _val
       --list|-l)
         LIST=1
         ;;
+      -l@)
+        LIST=1
+        _args+=("@")
+        ;;
       --lq)
         LIST=1
         LIST_Q=1
+        ;;
+      --lq@)
+        LIST=1
+        LIST_Q=1
+        _args+=("@")
         ;;
       --verbose|-v)
         VERBOSE=1
@@ -2968,7 +2977,7 @@ local _args=() _val
         # quick fix for ssh ptty
         #stty -onlcr
         ;;
-      --image-list|-t)
+      --image-list)
         LIST_IMAGES=1
         ;;
       --image-flush)
@@ -3059,7 +3068,7 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
           _hash="${_val}"
         fi
         ;;
-      --force|-f)
+      --force)
         FORCE=1
         ;;
       --full)
@@ -3091,13 +3100,13 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
         RSKVM_OPTS="${RSKVM_OPTS//bios:/}"
         RSKVM_OPTS+="preferuefi:"
         ;;
-      --uefi|-u)
+      --uefi)
         RSKVM_OPTS="${RSKVM_OPTS//preferuefi:/}"
         RSKVM_OPTS="${RSKVM_OPTS//uefi:/}"
         RSKVM_OPTS="${RSKVM_OPTS//bios:/}"
         RSKVM_OPTS+="uefi:"
         ;;
-      --bios|-b)
+      --bios)
         RSKVM_OPTS="${RSKVM_OPTS//preferuefi:/}"
         RSKVM_OPTS="${RSKVM_OPTS//uefi:/}"
         RSKVM_OPTS="${RSKVM_OPTS//bios:/}"
@@ -3217,11 +3226,9 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
       exists)
         if _is_vm_exists "${RSKVM_NAME}"
         then
-          echo -n "1"
-        else
-          echo -n "0"
+          exit 0
         fi
-        exit 0
+        exit 1
         ;;
       delete)
         _vm_delete "${RSKVM_NAME}"
@@ -3302,6 +3309,12 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
       _remote="${_remote} plotka:${_remote_plotka}"
     fi
     _remote="${_remote} domain:${DOMAIN}"
+    if [[ ${RSKVM_DO} == "exists" ]]
+    then
+      local _rc=0
+      _ssh "${RSKVM_HOST}" ${_remote}  --exists ${RSKVM_NAME}/${RSKVM_TEMPLATE}:${RSKVM_RAM}:${RSKVM_CPU} || _rc=$?
+      exit ${_rc}
+    fi
     if ! _ssh "${RSKVM_HOST}" ${_remote}  --${RSKVM_DO} ${RSKVM_NAME}/${RSKVM_TEMPLATE}:${RSKVM_RAM}:${RSKVM_CPU}; then
       _abort_script "remote ssh invocation failed!"
     fi
@@ -3716,7 +3729,6 @@ _completion() {
     '        _hosts+="${_pfx}${_host} "' \
     '      done' \
     '    fi' \
-    '    [[ ${_pfx} != "-" || ${cword} -ne 1 ]] || _hosts+="-c -m -g -l -t -v -f -u -b -h "' \
     '    COMPREPLY=($(compgen -W "${_hosts}" -- "${cur}"))' \
     '  fi' \
     '' \
