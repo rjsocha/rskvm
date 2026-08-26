@@ -121,6 +121,7 @@
 #    rskvm -m -ssh-key:<user>[@<hash>]      drop one key, or all keys of a user
 #    rskvm -m generate-ssh-keys:on|off      generate host keys inside the VM
 #    rskvm -m list|show|get                 list profiles, show or dump one
+#    rskvm -m push:<host>                   copy the profile to a host
 #
 #  rskvm configuration:
 #
@@ -1093,6 +1094,39 @@ local _val
   fi
 }
 
+_config_vm_profile_push() {
+local _host="${1}" _addr _opts _profile="${_runtime[profile]}" _src
+  if [[ -z ${_host} ]]
+  then
+    _abort_script "missing {G}host{N} name for {Y}push"
+  fi
+  command -v rsync &>/dev/null || _abort_script "{G}rsync{R} is required..."
+  _src="${CONFIG}/vm/profile/${_profile}"
+  if [[ ! -d ${_src} ]]
+  then
+    _abort_script "profile {G}%s{N} not found" "${_profile}"
+  fi
+  _host=$(_parse_host "${_host}")
+  if [[ -z ${_host} ]]
+  then
+    _abort_script "{G}push{N} needs a remote host"
+  fi
+  if [[ ! -d ${CONFIG}/host/${_host} ]]
+  then
+    _abort_script "unknown host {G}%s" "${_host}"
+  fi
+  _addr=$(_config_get_host "${_host}")
+  _opts=$(_ssh_options "${_host}")
+  _verbose_printf "Pushing profile {G}%s{N} to {Y}%s\n" "${_profile}" "${_host}"
+  if ! rsync -a --delete --mkpath --inplace \
+        -e "ssh ${_opts}" \
+        "${_src}/" "${_addr}:.config/rskvm/vm/profile/${_profile}/"
+  then
+    _abort_script "unable to push profile {G}%s{N} to {Y}%s" "${_profile}" "${_host}"
+  fi
+  _printf "profile {G}%s{N} pushed to {Y}%s\n" "${_profile}" "${_host}"
+}
+
 _config_vm() {
   _config_profile_set
   while [[ -n $1 ]]
@@ -1121,6 +1155,10 @@ _config_vm() {
         ;;
       -profile:*)
         _config_profile_rm "${1#*:}"
+        shift
+        ;;
+      push:*)
+        _config_vm_profile_push "${1#*:}"
         shift
         ;;
       active|default)
@@ -1527,8 +1565,32 @@ local _bridge br
   fi
 }
 
+_ssh_options() {
+local _tmp _key _user _port _opts
+  _opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+  if _tmp=$(_config_get "/host/${1}/auth")
+  then
+    if [[ $_tmp == "key" ]]
+    then
+      if _key=$(_config_get "/host/${1}/key")
+      then
+        _opts="${_opts} -i ${_key} -o IdentitiesOnly=yes"
+      fi
+    fi
+  fi
+  if _user=$(_config_get "/host/${1}/user")
+  then
+    _opts="${_opts} -l ${_user}"
+  fi
+  if ! _port=$(_config_get "/host/${1}/port")
+  then
+    _port="22"
+  fi
+  printf -- "%s -p %s" "${_opts}" "${_port}"
+}
+
 _ssh() {
-local _addr _user _default _auth _tmp _key _port _pass=0
+local _addr _default _pass=0
   if [[ ${1} == "--pass" ]]
   then
     shift
@@ -1540,26 +1602,7 @@ local _addr _user _default _auth _tmp _key _port _pass=0
     _default="${_default} ${1}"
     shift
   done
-  _default="${_default} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-  if _tmp=$(_config_get "/host/${1}/auth")
-  then
-    if [[ $_tmp == "key" ]]
-    then
-      if _key=$(_config_get "/host/${1}/key")
-      then
-        _default="${_default} -i ${_key} -o IdentitiesOnly=yes"
-      fi
-    fi
-  fi
-  if _user=$(_config_get "/host/${1}/user")
-  then
-    _default="${_default} -l ${_user}"
-  fi
-  if ! _port=$(_config_get "/host/${1}/port")
-  then
-    _port="22"
-  fi
-  _default="${_default} -p ${_port}"
+  _default="${_default} $(_ssh_options "${1}")"
   _addr=$(_config_get_host "${1}")
   shift
   if [[ ${_pass} -eq 0 ]]
@@ -3678,7 +3721,7 @@ _completion() {
     '            _list+="${_pfx}${_e} "' \
     '          done' \
     '        else' \
-    '          _list="list show get active profile: -profile: user: -user: group: -group: ssh-key: -ssh-key: generate-ssh-keys:on generate-ssh-keys:off --verbose"' \
+    '          _list="list show get active push: profile: -profile: user: -user: group: -group: ssh-key: -ssh-key: generate-ssh-keys:on generate-ssh-keys:off --verbose"' \
     '        fi' \
     '        ;;' \
     '      -g)' \
