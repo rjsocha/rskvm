@@ -1,20 +1,15 @@
 #!/bin/bash
-#
 # Usage:
 #
 #  rskvm [<options>] [+|-|?]<name>[/<template>][@<host>][:<ram>[:<cpu>]] <...>
-#
-#    +name   create        -name   delete        ?name   print the address
-#
 #  rskvm --list [<host>|@]                    list VMs
 #  rskvm --image-list                         list templates
-#  rskvm ssh:<name>[@<host>] [<ssh-args>]     ssh to a VM
-#
 #  rskvm -c host:<name> address:<fqdn> user:<user>   configure a host
 #  rskvm -c list                              list configured hosts
 #  rskvm -c show:me                           show the local configuration
 #  rskvm -m ...                               configure VM profiles
 #  rskvm -g ssh-vm-directory:<path>           configure rskvm
+#  rskvm -g default-image:<name>              set the default template
 #
 #  rskvm me:install | me:update | me:version | me:completion
 #
@@ -86,7 +81,6 @@
 #    rskvm --image-flush              drop downloaded templates
 #    rskvm --image-used               templates currently in use
 #    rskvm --image-unused [--purge]   unused templates, --purge removes them
-#    rskvm default-image:<name>       set the default template
 #
 #  Global options:
 #
@@ -95,10 +89,6 @@
 #    domain:<zone>        override the VM domain for this run
 #    plotka:<server>      override the plotka server for this run
 #    --help               this help (-h)
-#
-#  SSH to a VM:
-#
-#    rskvm ssh:[<user>/]<name>[@<host>] [<ssh-args> ...]
 #
 #  Host configuration:
 #
@@ -136,6 +126,7 @@
 #  rskvm configuration:
 #
 #    rskvm -g ssh-vm-directory:<path>       ~/.ssh/<path> for VM ssh entries
+#    rskvm -g default-image:<name>          template used when none is given
 #
 #  Self management:
 #
@@ -1152,6 +1143,14 @@ _config_rskvm() {
       # For bash completion script
       ssh-vm-directory:*)
         _config_put "config/ssh-vm-directory" "${1#*:}"
+        shift
+        ;;
+      default-image:*)
+        if [[ -z ${1#*:} ]]
+        then
+          _abort_script "missing {G}default-image{N} name"
+        fi
+        _vm_set_default_image "${1#*:}"
         shift
         ;;
       *)
@@ -2932,7 +2931,6 @@ local _args=() _val
   LIST_IMAGES=0
   FLUSH_IMAGES=0
   UPDATE_IMAGES=0
-  DEFAULT_IMAGE=""
 
   while [[ -n "${1}" ]]
   do
@@ -2979,12 +2977,6 @@ local _args=() _val
       --image-update)
         UPDATE_IMAGES=1
         ;;
-      default-image:*)
-        if ! DEFAULT_IMAGE=$(_extract_param "${1}")
-        then
-          _abort_script "missing {G}default-image{N} name"
-        fi
-        ;;
       *)
         _args+=("${1}")
     esac
@@ -3004,11 +2996,6 @@ local _args=() _val
      exit
   fi
 
-  if [[ -n ${DEFAULT_IMAGE} ]]
-  then
-    _vm_set_default_image "${DEFAULT_IMAGE}"
-    exit
-  fi
   if [[ ${LIST_IMAGES} -eq 1 ]]
   then
     _vm_list_images
@@ -3477,51 +3464,6 @@ _setup_host() {
   _printf "  {Y}$ME -m user:${_user}@? user:root@? ssh:root@~/.ssh/authorized_keys ssh:${_user}@~/.ssh/authorized_keys group:sudo@${_user}\n"
 }
 
-_ssh_to_vm() {
-local _host _name _remote=0 _ip _opts  _user=""
-  if [[ ${1} =~ @ ]]
-  then
-    _host="${1##*@}"
-    _name="${1%%@*}"
-  else
-    _host=""
-    _name="${1}"
-  fi
-  shift
-  if [[ ${1} == "--remote" ]]
-  then
-    _remote=1
-    shift
-  fi
-  if [[ $_remote -eq 1 ]]
-  then
-    if [[ ${_name} =~ / ]]
-    then
-      _user="${_name%%/*}"
-      _name="${_name##*/}"
-    fi
-    _ip=$(_vm_get_ip4_addr "${_name}")
-    if [[ -n ${_ip} ]]
-    then
-      _opts="-t -o LogLevel=QUIET -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-      if [[ -n ${_user} ]]
-      then
-        ssh ${_opts} ${_user}@${_ip} "$@"
-      else
-        ssh ${_opts} ${_ip} "$@"
-      fi
-    fi
-  else
-    if [[ ! ${_name} =~ / ]]
-    then
-      # append calling user
-      _name="${USER}/${_name}"
-    fi
-    _ssh -t "${_host}" ssh:${_name} --remote "$@"
-  fi
-  exit
-}
-
 _setup_remote_host_test() {
 local _host="${1}" _out
   shift
@@ -3683,21 +3625,51 @@ _completion() {
     '  _init_completion -s -n : || return;' \
     '  COMPREPLY=()' \
     '' \
-    '  if [[ ${cword} -ge 2 && ${COMP_WORDS[1]} == "-c" ]]' \
+    '  if [[ ${cword} -ge 2 && ${COMP_WORDS[1]} =~ ^-[cmg]$ ]]' \
     '  then' \
-    '    local _h _pfx _hosts=""' \
-    '    if [[ ${cur} =~ ^(\+|-)?host: ]]' \
-    '    then' \
-    '      _pfx="${cur%%host:*}host:"' \
-    '      for _h in $(find ~/.config/rskvm/host/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n" 2>/dev/null)' \
-    '      do' \
-    '        _hosts+="${_pfx}${_h} "' \
-    '      done' \
-    '      [[ ${_pfx} == "-host:" ]] || _hosts+="${_pfx}me "' \
-    '      COMPREPLY=($(compgen -W "${_hosts}" -- "${cur}"))' \
-    '    else' \
-    '      COMPREPLY=($(compgen -W "list show show:me info ssh get:uri key -key auth:key auth:agent plotka -plotka user: port: arch: address: host: -host: me: bridge: domain: disable:local -disable:local --verbose" -- "${cur}"))' \
-    '    fi' \
+    '    local _e _pfx _list=""' \
+    '    case "${COMP_WORDS[1]}" in' \
+    '      -c)' \
+    '        if [[ ${cur} =~ ^(\+|-)?host: ]]' \
+    '        then' \
+    '          _pfx="${cur%%host:*}host:"' \
+    '          if [[ ${_pfx} != "+host:" ]]' \
+    '          then' \
+    '            for _e in $(find ~/.config/rskvm/host/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n" 2>/dev/null)' \
+    '            do' \
+    '              _list+="${_pfx}${_e} "' \
+    '            done' \
+    '          fi' \
+    '          [[ ${_pfx} == "-host:" ]] || _list+="${_pfx}me "' \
+    '        else' \
+    '          _list="list show show:me info ssh get:uri key -key auth:key auth:agent plotka -plotka user: port: arch: address: +host: host: -host: me: bridge: domain: disable:local -disable:local --verbose"' \
+    '        fi' \
+    '        ;;' \
+    '      -m)' \
+    '        if [[ ${cur} =~ ^(\+|-)?profile: ]]' \
+    '        then' \
+    '          _pfx="${cur%%profile:*}profile:"' \
+    '          for _e in $(find ~/.config/rskvm/vm/profile/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n" 2>/dev/null)' \
+    '          do' \
+    '            _list+="${_pfx}${_e} "' \
+    '          done' \
+    '        else' \
+    '          _list="list show get active profile: -profile: user: -user: group: -group: ssh-key: -ssh-key: generate-ssh-keys:on generate-ssh-keys:off --verbose"' \
+    '        fi' \
+    '        ;;' \
+    '      -g)' \
+    '        if [[ ${cur} == default-image:* ]]' \
+    '        then' \
+    '          for _e in $(find ~/.config/rskvm/image/master/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n" 2>/dev/null)' \
+    '          do' \
+    '            _list+="default-image:${_e} "' \
+    '          done' \
+    '        else' \
+    '          _list="ssh-vm-directory: default-image:"' \
+    '        fi' \
+    '        ;;' \
+    '    esac' \
+    '    COMPREPLY=($(compgen -W "${_list}" -- "${cur}"))' \
     '  elif [[ ${cur} =~ ^\+([a-z][a-z0-9.-]+/[a-z0-9.-]+)@ ]] || [[ ${cur} =~ ^\+([a-z][a-z0-9.-]+)@ ]]' \
     '  then' \
     '    local host hosts=()' \
@@ -3846,16 +3818,6 @@ local _val
     -g)
       shift
       _config_rskvm "$@"
-      exit
-      ;;
-    ssh:*)
-      if _val=$(_extract_param "${1}")
-      then
-        shift
-        _ssh_to_vm "${_val}" "$@"
-      else
-        _abort_script "missing {G}name@host{N} for ssh connection"
-      fi
       exit
       ;;
     --image-used)
