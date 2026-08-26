@@ -641,19 +641,19 @@ local _host="${_runtime[host]}" _val="" _w=-8
   then
     _printf "{G}%${_w}s {N}%s\n" "ADDRESS:" "$_val"
   else
-    _printf "{G}%${_w}s {N}%s {Y}(default)\n" "ADDRESS:" "$_host"
+    _printf "{G}%${_w}s {N}%s\n" "ADDRESS:" "$_host"
   fi
   if _val=$(_config_get /host/${_host}/user)
   then
     _printf "{G}%${_w}s {N}%s\n" "USER:" "$_val"
   else
-    _printf "{G}%${_w}s {N}$USER {Y}(current)\n" "USER:"
+    _printf "{G}%${_w}s {N}$USER\n" "USER:"
   fi
   if _val=$(_config_get /host/${_host}/port)
   then
     _printf "{G}%${_w}s {N}%s\n" "PORT:" "$_val"
   else
-    _printf "{G}%${_w}s {N}22 {Y}(default)\n" "PORT:"
+    _printf "{G}%${_w}s {N}22\n" "PORT:"
   fi
   if _val=$(_config_get /host/${_host}/bridge)
   then
@@ -667,13 +667,13 @@ local _host="${_runtime[host]}" _val="" _w=-8
   then
     _printf "{G}%${_w}s {N}%s\n" "ARCH:" "$_val"
   else
-    _printf "{G}%${_w}s {N}%s {Y}(default)\n" "ARCH:" "${RSKVM_ARCH}"
+    _printf "{G}%${_w}s {N}%s\n" "ARCH:" "${RSKVM_ARCH}"
   fi
   if _val=$(_config_get /host/${_host}/auth)
   then
     _printf "{G}%${_w}s {N}%s\n" "AUTH:" "$_val"
   else
-    _printf "{G}%${_w}s {N}agent {Y}(default)\n" "AUTH:"
+    _printf "{G}%${_w}s {N}agent\n" "AUTH:"
   fi
   if [[ ${_val} == "key" ]]
   then
@@ -724,7 +724,7 @@ local _val="" _w=-18
   then
     _printf "{G}%${_w}s {N}%s\n" "ME:" "$_val"
   else
-    _printf "{G}%${_w}s {N}%s {Y}(default)\n" "ME:" "$(_who_am_i)"
+    _printf "{G}%${_w}s {N}%s\n" "ME:" "$(_who_am_i)"
   fi
   if _val=$(_config_get config/bridge)
   then
@@ -736,7 +736,7 @@ local _val="" _w=-18
   then
     _printf "{G}%${_w}s {N}%s\n" "DOMAIN:" "$_val"
   else
-    _printf "{G}%${_w}s {N}vm {Y}(default)\n" "DOMAIN:"
+    _printf "{G}%${_w}s {N}vm\n" "DOMAIN:"
   fi
   if _val=$(_config_get config/plotka)
   then
@@ -760,7 +760,7 @@ local _val="" _w=-18
   then
     _printf "{G}%${_w}s {N}%s\n" "DISABLE-LOCAL:" "yes"
   else
-    _printf "{G}%${_w}s {N}no {Y}(default)\n" "DISABLE-LOCAL:"
+    _printf "{G}%${_w}s {N}no\n" "DISABLE-LOCAL:"
   fi
 }
 
