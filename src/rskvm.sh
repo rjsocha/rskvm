@@ -583,6 +583,11 @@ _config_host_select() {
   then
     if _verify_hostname "$1"
     then
+      if [[ ${1} == $(_who_am_i) ]]
+      then
+        _runtime[host]="me"
+        return 0
+      fi
       if [[ ! -d ${CONFIG}/host/${1} ]]
       then
         _abort_script "unknown host {G}%s{N}, add it with {G}-c +host:%s" "${1}" "${1}"
@@ -628,13 +633,31 @@ local _me _val
   if ! _val=$(_config_get "config/mode") || [[ ${_val} != "client" ]]
   then
     _me="$(_who_am_i)"
-    _printf "{Y}%s\n" "${_me}"
+    if [[ -t 1 ]]
+    then
+      _printf "{Y}%s\n" "${_me}"
+    else
+      printf -- "%s\n" "${_me}"
+    fi
   fi
   _config_find_all host tree | sort | grep -v "^${_me}$" || true
 }
 
 _config_host_show_key() {
 local _host="${_runtime[host]}" _val=""
+  if [[ ${_host} == "me" ]]
+  then
+    if [[ ${1} == "address" ]]
+    then
+      echo -n "localhost"
+      return 0
+    fi
+    if _val=$(_config_get "/config/${1}")
+    then
+      echo -n "$_val"
+    fi
+    return 0
+  fi
   if _val=$(_config_get "/host/${_host}/${1}")
   then
     echo -n "$_val"
