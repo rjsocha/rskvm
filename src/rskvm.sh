@@ -105,7 +105,7 @@
 #    rskvm -c host:me +plotka[:<srv>]       the same for the local machine
 #    rskvm -c bridge:<name>                 libvirt bridge
 #    rskvm -c domain:<zone>                 VM domain, default: vm
-#    rskvm -c disable:local                 refuse to run VMs locally
+#    rskvm -c mode:host|client              whether this machine runs VMs
 #    rskvm -c list                          list configured hosts
 #
 #  VM profile configuration:
@@ -756,11 +756,11 @@ local _val="" _w=-18
   else
     _printf "{G}%${_w}s {N}{Y}(unset)\n" "DEFAULT-IMAGE:"
   fi
-  if _val=$(_config_get config/disable-local)
+  if _val=$(_config_get config/mode)
   then
-    _printf "{G}%${_w}s {N}%s\n" "DISABLE-LOCAL:" "yes"
+    _printf "{G}%${_w}s {N}%s\n" "MODE:" "$_val"
   else
-    _printf "{G}%${_w}s {N}no\n" "DISABLE-LOCAL:"
+    _printf "{G}%${_w}s {N}host\n" "MODE:"
   fi
 }
 
@@ -1413,12 +1413,17 @@ local _val
         fi
         shift
         ;;
-      +disable:local|disable:local)
-        _config_put "config/disable-local" "1"
-        shift
-        ;;
-      -disable:local)
-        _config_rm "config/disable-local"
+      mode:*)
+        case "${1#*:}" in
+          host)
+            _config_rm "config/mode"
+            ;;
+          client)
+            _config_put "config/mode" "client"
+            ;;
+          *)
+            _abort_script "unknown mode {G}%s{N} - use {G}host{N} or {G}client" "${1#*:}"
+        esac
         shift
         ;;
       bridge:*)
@@ -1987,16 +1992,16 @@ local _name="${1}" _info _mac _bridge _ip
 
 _check_local_access() {
 local _val
-  if _val=$(_config_get "config/disable-local")
+  if _val=$(_config_get "config/mode") && [[ ${_val} == "client" ]]
   then
-    _abort_script "local operations on this host aren't supported!"
+    _abort_script "this machine runs in {G}client{N} mode - no local VM operations!"
   fi
 }
 
 _list_all_vm() {
-local _host _quiet="${1}" _me
+local _host _quiet="${1}" _me _val
   _me="$(_who_am_i)"
-  if ! _config_get "config/disable-local" check
+  if ! _val=$(_config_get "config/mode") || [[ ${_val} != "client" ]]
   then
     if ! _list_vm ${_quiet} "@${_me}"
     then
@@ -3142,6 +3147,7 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
   elif [[ ${RSKVM_DO} == "viewer" ]]; then
       _vm_run_viewer "${RSKVM_NAME}" "${RSKVM_HOST}"
   elif [[ ${RSKVM_HOST} == "localhost" ]]; then
+    _check_local_access
     if [[ ${RSKVM_DO} != "pull" ]]; then
       _config_default_bridge
     fi
@@ -3631,7 +3637,7 @@ _completion() {
     '          fi' \
     '          [[ ${_pfx} == "-host:" ]] || _list+="${_pfx}me "' \
     '        else' \
-    '          _list="list show show:me info ssh get:uri key -key auth:key auth:agent plotka -plotka user: port: arch: address: +host: host: -host: me: bridge: domain: disable:local -disable:local --verbose"' \
+    '          _list="list show show:me info ssh get:uri key -key auth:key auth:agent plotka -plotka user: port: arch: address: +host: host: -host: me: bridge: domain: mode:host mode:client --verbose"' \
     '        fi' \
     '        ;;' \
     '      -m)' \
