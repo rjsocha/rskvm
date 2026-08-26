@@ -3263,7 +3263,22 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
       _ssh "${RSKVM_HOST}" ${_remote}  --exists ${RSKVM_NAME}/${RSKVM_TEMPLATE}:${RSKVM_RAM}:${RSKVM_CPU} || _rc=$?
       exit ${_rc}
     fi
-    if ! _ssh "${RSKVM_HOST}" ${_remote}  --${RSKVM_DO} ${RSKVM_NAME}/${RSKVM_TEMPLATE}:${RSKVM_RAM}:${RSKVM_CPU}; then
+    local _do_opt="--${RSKVM_DO}"
+    case "${RSKVM_DO}" in
+      create-wait)
+        _do_opt="--wait"
+        ;;
+      viewer)
+        _do_opt="--view"
+        ;;
+      guard)
+        _do_opt="--protect"
+        ;;
+      unguard)
+        _do_opt="--unprotect"
+        ;;
+    esac
+    if ! _ssh "${RSKVM_HOST}" ${_remote}  ${_do_opt} ${RSKVM_NAME}/${RSKVM_TEMPLATE}:${RSKVM_RAM}:${RSKVM_CPU}; then
       _abort_script "remote ssh invocation failed!"
     fi
     if ! _os=$(_config_get "image/master/${RSKVM_TEMPLATE}/os"); then
