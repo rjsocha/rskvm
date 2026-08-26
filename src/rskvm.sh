@@ -3644,6 +3644,19 @@ _install() {
 
 _completion() {
   printf "%s\n" \
+    '__rskvm_vm_action() {' \
+    '  local _w' \
+    '  for _w in ${COMP_WORDS[@]}' \
+    '  do' \
+    '    case ${_w} in' \
+    '      --start|--stop|--delete|--query|--exists|--console|--view|--commit|--protect|--unprotect|--hide|--unhide)' \
+    '        return 0' \
+    '        ;;' \
+    '    esac' \
+    '  done' \
+    '  return 1' \
+    '}' \
+    '' \
     '__rskvm_bash() {' \
     '  local cur words cword _nospace=0;' \
     '  declare -F _init_completion >/dev/null || return;' \
@@ -3695,25 +3708,38 @@ _completion() {
     '        ;;' \
     '    esac' \
     '    COMPREPLY=($(compgen -W "${_list}" -- "${cur}"))' \
-    '  elif [[ ${cur} =~ ^\+([a-z][a-z0-9.-]+/[a-z0-9.-]+)@ ]] || [[ ${cur} =~ ^\+([a-z][a-z0-9.-]+)@ ]]' \
+    '  elif [[ ${cur::1} != "-" ]] && __rskvm_vm_action' \
     '  then' \
-    '    local host hosts=()' \
+    '    local _vmd="" _host _vms=""' \
+    '    { read -r _vmd < ~/.config/rskvm/config/ssh-vm-directory; } 2>/dev/null' \
+    '    [[ -n ${_vmd} ]] || _vmd="vm.d"' \
+    '    if [[ -d ~/.ssh/${_vmd} ]]' \
+    '    then' \
+    '      for _host in $(find ~/.ssh/${_vmd}/ -maxdepth 1 -mindepth 1 -type f -printf "%f\n")' \
+    '      do' \
+    '        _vms+="${_host} "' \
+    '      done' \
+    '    fi' \
+    '    COMPREPLY=($(compgen -W "${_vms}" -- "${cur}"))' \
+    '  elif [[ ${cur} =~ ^(\+?)([a-z][a-z0-9.-]+/[a-z0-9.-]+)@ ]] || [[ ${cur} =~ ^(\+?)([a-z][a-z0-9.-]+)@ ]]' \
+    '  then' \
+    '    local host hosts=() _spec="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"' \
     '    for host in $(find ~/.config/rskvm/host/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n")' \
     '    do' \
-    '      hosts+="+${BASH_REMATCH[1]}@${host}: "' \
+    '      hosts+="${_spec}@${host} "' \
     '    done' \
     '    COMPREPLY=($(compgen -W "${hosts}" -- "${cur}"))' \
     '    _nospace=1' \
-    '  elif [[ ${cur} =~ ^\+([a-z][a-z0-9.-]+)/ ]]' \
+    '  elif [[ ${cur} =~ ^(\+?)([a-z][a-z0-9.-]+)/ ]]' \
     '  then' \
-    '    local ll xx=()' \
+    '    local ll xx=() _spec="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"' \
     '    for ll in $(find ~/.config/rskvm/image/alias/by-name/ -maxdepth 1 -mindepth 1 -printf "%f\n")' \
     '    do' \
-    '      xx+="+${BASH_REMATCH[1]}/${ll} "' \
+    '      xx+="${_spec}/${ll} "' \
     '    done' \
     '    COMPREPLY=($(compgen -W "${xx}" -- "${cur}"))' \
     '    _nospace=1' \
-    '  elif [[ ${cword} -eq 1 && -n ${cur} && ( ${cur} == me:* || me: == ${cur}* ) ]]' \
+    '  elif [[ ${cword} -eq 1 && -n ${cur} && ( ${cur} == me:* || me: == "${cur}"* ) ]]' \
     '  then' \
     '    COMPREPLY=($(compgen -W "me:install me:update me:version me:completion" -- "${cur}"))' \
     '  elif [[ ${cur::2} == "--" ]]' \
