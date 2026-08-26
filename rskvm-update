@@ -1,4 +1,5 @@
 #!/bin/bash
+ssh root@localhost rskvm me:update
 for _host in $(rskvm -c list)
 do
   _addr=$(rskvm -c host:${_host} show:address)
