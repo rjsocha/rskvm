@@ -78,14 +78,13 @@
 #    rskvm --lq [<host>|@]            the same, machine readable (--lq@)
 #    rskvm --image-list               list templates
 #    rskvm --image-update             refresh the template catalog
-#    rskvm --image-flush              drop downloaded templates
 #    rskvm --image-used               templates currently in use
 #    rskvm --image-unused [--purge]   unused templates, --purge removes them
 #
 #  Global options:
 #
 #    --verbose            verbose output (-v)
-#    --verbose-create     print the virt-install command line
+#    --explain            print the virt-install command line
 #    domain:<zone>        override the VM domain for this run
 #    plotka:<server>      override the plotka server for this run
 #    --help               this help (-h)
@@ -161,7 +160,7 @@ PLOTKA_SERVER=""
 # by _fqdn() only when the domain is non-empty. Overridable via `domain:<zone>`.
 DOMAIN="vm"
 RSKVM_ARCH="$(uname -m)"
-VERBOSE_CREATE=0
+EXPLAIN=0
 CURL_TIMEOUT=10
 
 _trap_error() {
@@ -1851,7 +1850,7 @@ local _params _firmware _firmware_verbose _graphics
     _params+=( --noreboot )
   fi
   _params+=( --hvm --virt-type kvm --noautoconsole --import --quiet )
-  if [[ ${VERBOSE_CREATE} -eq 1 ]]; then
+  if [[ ${EXPLAIN} -eq 1 ]]; then
     echo virt-install "${_params[@]}"
   fi
   virt-install "${_params[@]}"
@@ -2329,59 +2328,6 @@ local _catalog _entry _image _format _os _variant _images _aliases _alias _info 
       _abort_script "unable to retrive image catalog"
     fi
   fi
-}
-
-_vm_flush_images() {
-local _image _same _list _host _remote
-  abort_script "_vm_flush_images() refactor me!"
-  if [[ ${IS_REMOTE} -eq 0 ]]
-  then
-    _host=$(_parse_host "${1}")
-    if [[ -n ${_host} ]]
-    then
-      _remote=" "
-      if [[ $VERBOSE -eq 1 ]]
-      then
-        _remote=" --verbose "
-      fi
-      if [[ $FORCE -eq 1 ]]
-      then
-        _remote="${_remote}--force "
-      fi
-      if ! _ssh "${_host}" --remote${_remote}--image-flush
-      then
-        _abort_script "connection to {G}%s{N} failed!" "${_host}"
-      fi
-      return
-    else
-      _check_local_access
-    fi
-  fi
-  _list=$(_config_find_all image tree)
-  for _image in ${_list}
-  do
-    if _same=$(_config_get "image/${_image}/image")
-    then
-      if [[ ${_same} == ${_image} ]]
-      then
-        if [[ -f ${TEMPLATES}/${_image} ]]
-        then
-          _verbose_printf "Cleaning image {G}%s{N} from {Y}%s/%s\n" "${_image}" "${TEMPLATES}" "${_image}"
-          if [[ $FORCE -eq 1 ]]
-          then
-            if rm -f "${TEMPLATES}/${_image}" 2>/dev/null
-            then
-              _verbose_printf "Image {G}%s{N} removed.\n" "${_image}"
-            else
-              _printf "{Y}WARNING: {N}unable to remove image {G}%s\n" "${_image}"
-            fi
-          else
-            _abort_script "make sure you know what you doing! use {G}--force{N} to confirm!"
-          fi
-        fi
-      fi
-    fi
-  done
 }
 
 _vm_list_images() {
@@ -2941,7 +2887,6 @@ local _args=() _val
   LIST=0
   LIST_Q=0
   LIST_IMAGES=0
-  FLUSH_IMAGES=0
   UPDATE_IMAGES=0
 
   while [[ -n "${1}" ]]
@@ -2975,8 +2920,8 @@ local _args=() _val
       --verbose|-v)
         VERBOSE=1
         ;;
-      --verbose-create)
-        VERBOSE_CREATE=1
+      --explain)
+        EXPLAIN=1
         ;;
       plotka:*)
         PLOTKA_SERVER="${_cmd#*:}"
@@ -2991,9 +2936,6 @@ local _args=() _val
         ;;
       --image-list)
         LIST_IMAGES=1
-        ;;
-      --image-flush)
-        FLUSH_IMAGES=1
         ;;
       --image-update)
         UPDATE_IMAGES=1
@@ -3011,12 +2953,6 @@ local _args=() _val
     _vm_update_images
     exit
   fi
-  if [[ ${FLUSH_IMAGES} -eq 1 ]]
-  then
-     _vm_flush_images "$@"
-     exit
-  fi
-
   if [[ ${LIST_IMAGES} -eq 1 ]]
   then
     _vm_list_images
@@ -3277,8 +3213,8 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
     then
       _remote="${_remote} --verbose"
     fi
-    if [[ ${VERBOSE_CREATE} -eq 1 ]]; then
-      _remote="${_remote} --verbose-create"
+    if [[ ${EXPLAIN} -eq 1 ]]; then
+      _remote="${_remote} --explain"
     fi
     case "${RSKVM_DO}" in
       create|create-wait)
@@ -3744,7 +3680,7 @@ _completion() {
     '    COMPREPLY=($(compgen -W "me:install me:update me:version me:completion" -- "${cur}"))' \
     '  elif [[ ${cur::2} == "--" ]]' \
     '  then' \
-    '    local _o _opts="--help --usage --list --lq --verbose --verbose-create --force --image-list --image-update --image-flush --image-used --image-unused --create --wait --delete --query --exists --start --stop --console --view --pull --commit --protect --unprotect --hide --unhide --full --link --nested --boot --no-boot --no-config --uefi --bios --prefer-uefi --update --remote-update"' \
+    '    local _o _opts="--help --usage --list --lq --verbose --explain --force --image-list --image-update --image-used --image-unused --create --wait --delete --query --exists --start --stop --console --view --pull --commit --protect --unprotect --hide --unhide --full --link --nested --boot --no-boot --no-config --uefi --bios --prefer-uefi --update --remote-update"' \
     '    for _o in ${COMP_WORDS[@]}' \
     '    do' \
     '      if [[ ${_o} == "--image-unused" ]]' \
