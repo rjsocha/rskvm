@@ -1,39 +1,133 @@
 #!/bin/bash
 #
-# ██████╗ ███████╗██╗  ██╗██╗   ██╗███╗   ███╗
-# ██╔══██╗██╔════╝██║ ██╔╝██║   ██║████╗ ████║
-# ██████╔╝███████╗█████╔╝ ██║   ██║██╔████╔██║
-# ██╔══██╗╚════██║██╔═██╗ ╚██╗ ██╔╝██║╚██╔╝██║
-# ██║  ██║███████║██║  ██╗ ╚████╔╝ ██║ ╚═╝ ██║
-# ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝  ╚═══╝  ╚═╝     ╚═╝
-#
 # Usage:
-#  rskvm [--verbose] [--verbose-create] [--force] <[--full] [--no-config] [?|+|-]name[/template][@host][:ram][:cpu]> <...>
-#  rskvm -c me:<name> +-host:<name> +-address:<address> +-user:<name> +-auth:<key|agent> +-ssh-key:<key-file> +-port:<ssh-port> +-arch:<arch> +-plotka[:<server>]
-#  rskvm config::vm +-user:<user>@[<PASSWORD|?>] +-group:<group>@<user> +-ssh-key:<user>@<ssh-public-file> +-profile:<name> get show list
-#  rskvm config::vm profile:<name> generate-ssh-keys:ON|OFF
-#  rskvm config::rskvm ssh-host:<path>
-#  rskvm me:install me:version me:completion
+#
+#  rskvm [<options>] <vm-spec> [<vm-spec> ...]
+#
+#  VM spec:
+#
+#    [<op>]<name>[/<template>][@<host>][:<ram>[:<cpu>]]
+#
+#      +name      create and wait for the VM (default when no prefix given)
+#      -name      delete
+#      ?name      print the IPv4 address (alias: .name)
+#      ^name      print 1 when the VM exists, 0 otherwise
+#
+#      name       [a-z0-9][a-z0-9-]*[a-z0-9], 2..63 characters
+#      template   image name or alias (--image-list), default: default-image
+#      host       configured host name, default: local machine
+#      ram        MiB, default 2048
+#      cpu        vCPU count, default 2
+#
+#    example: rskvm +web/debian-13@hz:4096:4
+#
+#  Actions (override the spec prefix):
+#
+#    --create             create, do not wait for the VM to boot
+#    --wait               create and wait for the VM to boot
+#    --delete             delete
+#    --query              print the IPv4 address
+#    --exists             print 1/0
+#    --start              start
+#    --stop               shutdown via guest agent, then ACPI
+#    --console            attach to the serial console
+#    --view               attach a graphical viewer
+#    --pull               only fetch the template
+#    --commit             pull the backing file into the VM disk
+#    --protect            deny delete
+#    --unprotect          allow delete
+#    --hide               hide the VM from --list
+#    --unhide             show the VM in --list
+#
+#  Create options:
+#
+#    --full               full disk copy instead of a backing file
+#    --link               backing file clone, default, cancels --full
+#    --nested             expose nested virtualization to the guest
+#    --no-boot            leave the VM down after creation
+#    --boot               boot after creation, default, cancels --no-boot
+#    --no-config          skip cloud config injection
+#    --uefi               force UEFI firmware (-u)
+#    --bios               force BIOS firmware (-b)
+#    --prefer-uefi        UEFI when the template supports it
+#    --update             refresh the template catalog locally and on the host
+#    --remote-update      refresh the template catalog on the host only
+#    --force              allow more than 32 vCPU or 65536 MiB RAM (-f)
+#    profile:<name>       cloud config profile used for this VM
+#
+#  Listing:
+#
+#    rskvm --list [<host>|@]          list VMs (-l), @ covers every host
+#    rskvm --lq [<host>|@]            the same, machine readable
+#    rskvm --image-list               list templates (-t)
+#    rskvm --image-update             refresh the template catalog
+#    rskvm --image-flush              drop downloaded templates
+#    rskvm --image-used               templates currently in use
+#    rskvm --image-unused [--purge]   unused templates, --purge removes them
+#    rskvm default-image:<name>       set the default template
+#
+#  Global options:
+#
+#    --verbose            verbose output (-v)
+#    --verbose-create     print the virt-install command line
+#    domain:<zone>        override the VM domain for this run
+#    plotka:<server>      override the plotka server for this run
+#    --help               this help (-h)
+#
+#  SSH to a VM:
+#
+#    rskvm ssh:[<user>/]<name>[@<host>] [<ssh-args> ...]
+#
+#  Host configuration:
+#
+#    rskvm -c me:<name>                     name of this machine
+#    rskvm -c host:<name> address:<fqdn> [user:<user>] [port:<22>] [arch:<arch>]
+#    rskvm -c -host:<name>                  drop a host
+#    rskvm -c host:<name> show              show the host configuration
+#    rskvm -c show:me                       show the local configuration
+#    rskvm -c host:<name> show:<key>        print a single key
+#    rskvm -c host:<name> info              host resources, local when no host
+#    rskvm -c host:<name> ssh [<args>]      ssh to the host
+#    rskvm -c host:<name> +key[:<file>]     ssh key for the host (-key drops)
+#    rskvm -c host:<name> +auth:key|agent   authentication method
+#    rskvm -c host:<name> +plotka[:<srv>]   register VMs in plotka (-plotka off)
+#    rskvm -c host:me +plotka[:<srv>]       the same for the local machine
+#    rskvm -c bridge:<name>                 libvirt bridge
+#    rskvm -c domain:<zone>                 VM domain, default: vm
+#    rskvm -c disable:local                 refuse to run VMs locally
+#    rskvm -c list                          list configured hosts
+#
+#  VM profile configuration:
+#
+#    rskvm -m profile:<name>                profile for the following options
+#    rskvm -m -profile:<name>               drop a profile
+#    rskvm -m active                        make the profile the default one
+#    rskvm -m +user:<user>@[<pass>|?]       add a user, ? asks for the password
+#    rskvm -m -user:<user>                  drop a user
+#    rskvm -m +group:<group>@<user>         add the user to a group
+#    rskvm -m -group:<group>@<user>         drop the user from a group
+#    rskvm -m +ssh-key:<user>@<file>        authorize an ssh public key
+#    rskvm -m -ssh-key:<user>[@<hash>]      drop one key, or all keys of a user
+#    rskvm -m generate-ssh-keys:on|off      generate host keys inside the VM
+#    rskvm -m list|show|get                 list profiles, show or dump one
+#
+#  rskvm configuration:
+#
+#    rskvm -g ssh-vm-directory:<path>       ~/.ssh/<path> for VM ssh entries
+#
+#  Self management:
+#
+#    rskvm me:install                       install into /usr/bin/rskvm
+#    rskvm me:update                        update from the GitHub release
+#    rskvm me:version                       print the version
+#    rskvm me:completion                    print the bash completion script
 #
 #  Basic setup:
 #
-#  rskvm -c me:<name>
-#  rskvm -g ssh-vm-directory:<path>
-#  rskvm -c bridge:<name> domain:<zone>
-#
-#  Local host config (global namespace):
-#
-#    rskvm -c host:me [+-plotka[:<server>]] show
-#
-#  Host setup:
-#
-#    rskvm config:host host:<NAME> address:<FQDN> user:<USER> [port:<22>] [arch:<arch>] [+-plotka[:<server>]]
-#
-#  Templates:
-#
-#    rskvm default-image:<name>
-#    rskvm --image-list | --image-update | --image-unused [--purge] |  rskvm --image-used
-#    rskvm --pull <[+]name/template[@host]> <...>
+#    rskvm -c me:<name>
+#    rskvm -c bridge:<name> domain:<zone>
+#    rskvm -g ssh-vm-directory:<path>
+#    source <(rskvm me:completion)
 #
 # EOU
 set -eE
@@ -176,11 +270,7 @@ local _v="$1"
 
 _usage() {
 local _me=$(realpath -eq $0)
-  _printf "{G}{N}"
-  tail -q -n+2 "${_me}" | head -q -n 7 | sed "s/^#//" |  grep -v "^$" >&2
-  _printf "{Y}{N}"
   sed -n '/^# Usage/,${p;/^# EOU/q}' "${_me}" | head -q -n-1 | sed "s/^#//" >&2
-  _printf "{N}{N}"
 }
 
 _config_rm() {
@@ -367,7 +457,7 @@ _config_host_add() {
       _abort_script "incorrect hostname {G}%s" "${1}"
     fi
   else
-    _abort_script "missing hostname for {G}config::host{N}"
+    _abort_script "missing hostname for {G}-c host:<name>{N}"
   fi
 }
 
@@ -385,7 +475,7 @@ _config_host_auth() {
         _abort_script "incorrect auth type {G}%s" "${1}"
     esac
   else
-    _abort_script "missing auth type for {G}config::host{N}"
+    _abort_script "missing auth type for {G}-c auth:<key|agent>{N}"
   fi
 }
 
@@ -477,7 +567,7 @@ _config_host_rm() {
       _abort_script "incorrect hostname {G}%s" "${1}"
     fi
   else
-    _abort_script "missing hostname for {G}config::host{N}"
+    _abort_script "missing hostname for {G}-c host:<name>{N}"
   fi
 }
 
@@ -801,7 +891,7 @@ _config_profile_rm() {
   then
     _config_rm "vm/profile/${1}/"
   else
-    _abort_script "missing profile name for {G}config::vm:profile:rm{N}"
+    _abort_script "missing profile name for {G}-m -profile:<name>{N}"
   fi
 }
 
@@ -1114,26 +1204,30 @@ local _val
           _abort_script "missing {G}host{N} name (required for {Y}ssh)"
         fi
         ;;
-      show:*|show::*)
+      show:me)
+        _config_me_show
+        shift
+        ;;
+      show:*)
         if _require_runtime host
         then
           if _val=$(_extract_param "${1}")
           then
             _config_host_show_key "${_val}"
           else
-            _abort_script "missing {G}key{N} for {Y}show::*"
+            _abort_script "missing {G}key{N} for {Y}show:<key>"
           fi
         else
-          _abort_script "missing {G}host{N} name (required for {Y}show::*)"
+          _abort_script "missing {G}host{N} name (required for {Y}show:<key>)"
         fi
         shift
         ;;
-      get:uri|get::uri)
+      get:uri)
         if _require_runtime host
         then
           _print_line $(_vm_host_uri "${_runtime[host]}")
         else
-          _abort_script "missing {G}host{N} name (required for {Y}show::*)"
+          _abort_script "missing {G}host{N} name (required for {Y}show:<key>)"
         fi
         shift
         ;;
@@ -2786,7 +2880,7 @@ local _args=() _val
       --list|-l)
         LIST=1
         ;;
-      --lq|-lq)
+      --lq)
         LIST=1
         LIST_Q=1
         ;;
@@ -2807,16 +2901,16 @@ local _args=() _val
         # quick fix for ssh ptty
         #stty -onlcr
         ;;
-      --list-images|--list-templates|--templates|-t|list:images|list::images|list:templates|list::templates|--image-list)
+      --image-list|-t)
         LIST_IMAGES=1
         ;;
-      --flush-images|--flush-templates|flush:images|flush::images|flush:templates|flush::templates)
+      --image-flush)
         FLUSH_IMAGES=1
         ;;
-      --update-images|--update-templates|update:images|update::images|update:templates|update::templates|--image-update|--images-update)
+      --image-update)
         UPDATE_IMAGES=1
         ;;
-      default-image:*|default::image:*)
+      default-image:*)
         if ! DEFAULT_IMAGE=$(_extract_param "${1}")
         then
           _abort_script "missing {G}default-image{N} name"
@@ -2877,7 +2971,7 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
   while [[ -n "${1}" ]]; do
     _cmd="$1"
     case "${_cmd,,}" in
-       cloud-config::*|cloud-config:*)
+       cloud-config:*)
         if _val=$(_extract_param "${1}")
         then
           if _val=$(echo "${_val}" | base64 -d 2>/dev/null)
@@ -2895,7 +2989,7 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
           _abort_script "{G}cloud-config{N} missing configuration"
         fi
         ;;
-      profile::*|profile:*)
+      profile:*)
         if _val=$(_extract_param "${1}")
         then
           _runtime[profile]="${_val}"
@@ -2941,7 +3035,7 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
         RSKVM_OPTS="${RSKVM_OPTS//bios:/}"
         RSKVM_OPTS+="preferuefi:"
         ;;
-      --uefi|--efi|-u)
+      --uefi|-u)
         RSKVM_OPTS="${RSKVM_OPTS//preferuefi:/}"
         RSKVM_OPTS="${RSKVM_OPTS//uefi:/}"
         RSKVM_OPTS="${RSKVM_OPTS//bios:/}"
@@ -2953,7 +3047,7 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
         RSKVM_OPTS="${RSKVM_OPTS//bios:/}"
         RSKVM_OPTS+="bios:"
         ;;
-      --no-metadata|--no-config|--noconfig)
+      --no-config)
         RSKVM_OPTS+="noconfig:"
         ;;
       --stop)
@@ -2962,7 +3056,7 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
       --start)
         _action="start"
         ;;
-      --create-wait|--wait)
+      --wait)
         _action="create-wait"
         ;;
       --create)
@@ -2971,7 +3065,7 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
       --query)
         _action="query"
         ;;
-      --noboot|--no-boot)
+      --no-boot)
         RSKVM_OPTS="${RSKVM_OPTS//noboot:/}"
         RSKVM_OPTS+="noboot:"
         ;;
@@ -2981,19 +3075,19 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
       --pull)
         _action="pull"
         ;;
-      --delete|--destroy)
+      --delete)
         _action="delete"
         ;;
-      --console|--con|--tty)
+      --console)
         _action="console"
         ;;
-      --view|--viewer)
+      --view)
         _action="viewer"
         ;;
-      --protect|--guard)
+      --protect)
         _action="protect"
         ;;
-      --unprotect|--unguard)
+      --unprotect)
         _action="unprotect"
         ;;
       --hide)
@@ -3002,10 +3096,10 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
       --unhide)
         _action="unhide"
         ;;
-      --exists|--exist)
+      --exists)
         _action="exists"
         ;;
-      --commit|--rebase)
+      --commit)
         _action="commit"
          ;;
       *)
@@ -3519,6 +3613,25 @@ _completion() {
     '  _init_completion -s || return;' \
     '  COMPREPLY=()' \
     '' \
+    '  if [[ ${cword} -ge 2 && ${COMP_WORDS[1]} == "-c" ]]' \
+    '  then' \
+    '    local _h _pfx _hosts=""' \
+    '    if [[ ${cur} =~ ^(\+|-)?host: ]]' \
+    '    then' \
+    '      _pfx="${cur%%host:*}host:"' \
+    '      for _h in $(find ~/.config/rskvm/host/ -maxdepth 1 -mindepth 1 -type d -printf "%f\n" 2>/dev/null)' \
+    '      do' \
+    '        _hosts+="${_pfx}${_h} "' \
+    '      done' \
+    '      [[ ${_pfx} == "-host:" ]] || _hosts+="${_pfx}me "' \
+    '      COMPREPLY=($(compgen -W "${_hosts}" -- "${cur}"))' \
+    '    else' \
+    '      COMPREPLY=($(compgen -W "list show show:me info ssh get:uri key -key auth:key auth:agent plotka -plotka user: port: arch: address: host: -host: me: bridge: domain: disable:local -disable:local --verbose" -- "${cur}"))' \
+    '    fi' \
+    '    [[ ${#COMPREPLY[@]} -ne 1 || ${COMPREPLY[0]} != *: ]] || compopt -o nospace' \
+    '    return 0' \
+    '  fi' \
+    '' \
     '  if [[ ${cur} =~ ^\+([a-z][a-z0-9-]+/[a-z0-9-]+)@ ]] || [[ ${cur} =~ ^\+([a-z][a-z0-9-]+)@ ]]' \
     '  then' \
     '    local host hosts=()' \
@@ -3537,11 +3650,14 @@ _completion() {
     '    COMPREPLY=($(compgen -W "${xx}" -- "${cur}"))' \
     '  elif [[ ${cur::2} == "--" ]]' \
     '  then' \
-    '    COMPREPLY=($(compgen -W "--image-list --image-update --image-unused --image-used --start --stop --console --full --verbose --no-config --update --remote-update --nested --link --prefer-uefi --bios --uefi --query --protect --unprotect --hide --unhide --exists --rebase --no-boot --boot --pull" -- "${cur}"))' \
+    '    COMPREPLY=($(compgen -W "--help --list --lq --verbose --verbose-create --force --image-list --image-update --image-flush --image-used --image-unused --purge --create --wait --delete --query --exists --start --stop --console --view --pull --commit --protect --unprotect --hide --unhide --full --link --nested --boot --no-boot --no-config --uefi --bios --prefer-uefi --update --remote-update" -- "${cur}"))' \
     '  elif [[ ${cur::1} == "-" ]]; then' \
-    '    [[ -e ~/.ssh/vm.d ]] || return 0' \
+    '    local _vmd=""' \
+    '    { read -r _vmd < ~/.config/rskvm/config/ssh-vm-directory; } 2>/dev/null' \
+    '    [[ -n ${_vmd} ]] || _vmd="vm.d"' \
+    '    [[ -d ~/.ssh/${_vmd} ]] || return 0' \
     '    local _host _hosts' \
-    '    for _host in $(find ~/.ssh/vm.d/ -maxdepth 1 -mindepth 1 -type f -printf "%f\n"); do' \
+    '    for _host in $(find ~/.ssh/${_vmd}/ -maxdepth 1 -mindepth 1 -type f -printf "%f\n"); do' \
     '      if [[ ${cword} -gt 1 ]]; then' \
     '        local _n _c=0' \
     '        for _n in ${COMP_WORDS[@]}' \
@@ -3559,6 +3675,7 @@ _completion() {
     '      fi' \
     '      _hosts+="-${_host} "' \
     '    done' \
+    '    [[ ${cword} -ne 1 ]] || _hosts+="-c -m -g -l -t -v -f -u -b -h "' \
     '    local _words=($(compgen -W "${_hosts}" -- "$cur"))' \
     '    if [[ ${#_words[@]} -eq 1 ]]; then' \
     '      local _host=${_words[@]}' \
@@ -3641,26 +3758,22 @@ local _val
       _host_config_user ${1#*:}
       exit
       ;;
-    setup::host|setup:host|--setup-host)
+    --setup-host)
       shift
       _setup_host "$@"
       exit
       ;;
-    host:list|host::list|list:host|list::host)
-      _config_host_list
-      exit
-      ;;
-    config::host|config:host|--config-host|-c)
+    -c)
       shift
       _config_host "$@"
       exit
       ;;
-    config::vm|config:vm|--config-vm|--vm|-m)
+    -m)
       shift
       _config_vm "$@"
       exit
       ;;
-    config::rskvm|config:rskvm|--config-rskvm|--rskvm|-g)
+    -g)
       shift
       _config_rskvm "$@"
       exit
@@ -3675,12 +3788,12 @@ local _val
       fi
       exit
       ;;
-    image:backing|image:used|--image-backing|--image-used)
+    --image-used)
       shift
       _show_backing_templates "$@"
       exit
       ;;
-    image:unused|--image-unused)
+    --image-unused)
       shift
       _show_unused_templates "$@"
       ;;
