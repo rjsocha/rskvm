@@ -2336,7 +2336,7 @@ local _image _same _list _host _remote
       then
         _remote="${_remote}--force "
       fi
-      if ! _ssh "${_host}" --remote${_remote}--flush-templates
+      if ! _ssh "${_host}" --remote${_remote}--image-flush
       then
         _abort_script "connection to {G}%s{N} failed!" "${_host}"
       fi
