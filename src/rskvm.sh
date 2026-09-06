@@ -1979,11 +1979,9 @@ _save_ssh_host() {
         } >"${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
       else
         {
-          printf -- "Host %s\n" "$(_fqdn "${ssh_host}")"
+          printf -- "Host %s %s\n" "$(_fqdn "${ssh_host}")" "${ssh_host}"
           printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
           printf -- "  User %s\n" "${user}"
-          printf -- "Host %s\n" "${ssh_host}"
-          printf -- "  Hostname %s\n" "$(_fqdn "${ssh_host}")"
         } >"${HOME}/.ssh/${vmd}/${ssh_host}@${vmhost}"
       fi
     fi
