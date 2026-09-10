@@ -2703,9 +2703,12 @@ local os
   done
   if [[ -n ${_ip} ]]
   then
+    local __time_stop __time_total
+    __time_stop="$(date +%s%3N 2>/dev/null)" || true
     _plotka "+[${_ip}].$(_fqdn "${_name}")"
     sleep 0.4
-    _printf " {Y}%s\n" "${_ip}"
+    printf -v __time_total "(%s.%s s)" "$(( (__time_stop - __time_start) / 1000 ))" "$(( (__time_stop - __time_start) % 1000 ))"
+    _printf " {Y}%s {G}%s\n" "${_ip}" "${__time_total}"
   else
     _printf " {Y}TIMEOUT\n"
   fi
@@ -3232,6 +3235,8 @@ local _rest=() _val _remote _action _hash _remote_hash _os _user
         fi
         ;;
       create-wait|create)
+        declare -G __time_start
+        __time_start="$(date +%s%3N 2>/dev/null)" || true
         vm_create ${RSKVM_NAME} ${RSKVM_TEMPLATE} ${RSKVM_RAM} ${RSKVM_CPU} "${RSKVM_OPTS}" "${_hash}"
         if [[ ${RSKVM_DO} == "create-wait" ]] && ! [[ ${RSKVM_OPTS} =~ :noboot: ]]; then
           _vm_wait_for_me "${RSKVM_NAME}" "$(_who_am_i)" "${RSKVM_TEMPLATE}"
