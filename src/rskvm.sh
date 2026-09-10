@@ -1930,6 +1930,8 @@ local _params _firmware _firmware_verbose _graphics
   if [[ ${EXPLAIN} -eq 1 ]]; then
     echo virt-install "${_params[@]}"
   fi
+  declare -G __time_create
+  __time_create="$(date +%s%3N 2>/dev/null)" || true
   virt-install "${_params[@]}"
   _save_ssh_host "${_name}" "${_os}" "${_user}"
   _verbose_printf "{G}%s {Y}created successfully!\n" "${_name}"
@@ -2703,12 +2705,18 @@ local os
   done
   if [[ -n ${_ip} ]]
   then
-    local __time_stop __time_total
+    local __time_stop __time_total __time_ready __time_output
     __time_stop="$(date +%s%3N 2>/dev/null)" || true
     _plotka "+[${_ip}].$(_fqdn "${_name}")"
     sleep 0.4
-    printf -v __time_total "(%s.%s s)" "$(( (__time_stop - __time_start) / 1000 ))" "$(( (__time_stop - __time_start) % 1000 ))"
-    _printf " {Y}%s {G}%s\n" "${_ip}" "${__time_total}"
+    __time_total="$(( __time_stop - __time_start))"
+    __time_ready="$(( __time_stop - __time_create))"
+    if [[ $(( __time_total - __time_ready )) -lt 1000 ]]; then
+      printf -v __time_output "(%s.%s s)" "$(( __time_total / 1000 ))" "$(( __time_total % 1000 ))"
+    else
+      printf -v __time_output "(%s.%s / %s.%s s)" "$(( __time_total / 1000 ))" "$(( __time_total % 1000 ))" "$(( __time_ready / 1000 ))" "$(( __time_ready % 1000 ))"
+    fi
+    _printf " {Y}%s {M}%s\n" "${_ip}" "${__time_output}"
   else
     _printf " {Y}TIMEOUT\n"
   fi
