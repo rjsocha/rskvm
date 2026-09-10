@@ -2560,6 +2560,7 @@ local me="$(_who_am_i)"
   then
     _abort_script "name {G}%s{N} too long!" "${_name}"
   fi
+  _name="${_name,,}"
   if ! _verify_name "${_name}"
   then
     _abort_script "incorrect name: {Y}%s {N}allowed characters: {Y}[a-z][a-z0-9.-]*[a-z0-9]" "${_name}"
